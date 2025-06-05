@@ -26,6 +26,12 @@ const verifyToken = (token) => {
   }
 };
 
+// Public route middleware - allows access to all
+const publicRoute = (req, res, next) => {
+  next();
+};
+
+// Main authentication middleware
 const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
@@ -40,7 +46,7 @@ const authenticateToken = async (req, res, next) => {
 
     const decoded = verifyToken(token);
     
-    const user = await User.findById(decoded.userId);
+    const user = await User.findById(decoded.userId).select('-password');
     if (!user || user.status !== 'active') {
       return res.status(401).json({
         success: false,
@@ -48,12 +54,7 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
-    req.user = {
-      userId: decoded.userId,
-      role: decoded.role,
-      userDetails: user
-    };
-    
+    req.user = user;
     next();
   } catch (error) {
     console.error('Authentication error:', error);
@@ -64,6 +65,7 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
+// Admin role middleware
 const requireAdmin = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({
@@ -76,6 +78,25 @@ const requireAdmin = (req, res, next) => {
     return res.status(403).json({
       success: false,
       message: 'Admin access required'
+    });
+  }
+  
+  next();
+};
+
+// User role middleware
+const requireUser = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required'
+    });
+  }
+
+  if (req.user.role !== 'user') {
+    return res.status(403).json({
+      success: false,
+      message: 'User access required'
     });
   }
   
@@ -120,7 +141,7 @@ const requireOwnershipOrAdmin = (req, res, next) => {
   }
 };
 
-// Optional middleware to authenticate but not require authentication
+// Optional authentication middleware
 const optionalAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
@@ -128,14 +149,10 @@ const optionalAuth = async (req, res, next) => {
 
     if (token) {
       const decoded = verifyToken(token);
-      const user = await User.findById(decoded.userId);
+      const user = await User.findById(decoded.id).select('-password');
       
       if (user && user.status === 'active') {
-        req.user = {
-          userId: decoded.userId,
-          role: decoded.role,
-          userDetails: user
-        };
+        req.user = user;
       }
     }
     
@@ -145,12 +162,36 @@ const optionalAuth = async (req, res, next) => {
   }
 };
 
+// Role-based middleware
+const requireRole = (roles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Insufficient permissions'
+      });
+    }
+
+    next();
+  };
+};
+
 module.exports = {
   generateToken,
   verifyToken,
+  publicRoute,
   authenticateToken,
   requireAdmin,
+  requireUser,
   requireCustomerOrAdmin,
   requireOwnershipOrAdmin,
-  optionalAuth
+  optionalAuth,
+  requireRole
 };
