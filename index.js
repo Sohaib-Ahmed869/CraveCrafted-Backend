@@ -12,7 +12,8 @@ const UserRouter=require('./Routes/UserRoutes')
 
 app.use(
   cors({
-    origin: '*',
+    origin: true,
+    credentials:true,
   })
 );
 app.use("/users",UserRouter)
