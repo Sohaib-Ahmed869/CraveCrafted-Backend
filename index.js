@@ -10,10 +10,11 @@ connectDB();
 app.use(helmet()); 
 const UserRouter=require('./Routes/UserRoutes')
 
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: '*',
+  })
+);
 app.use("/users",UserRouter)
 
 process.on('SIGTERM', () => {
