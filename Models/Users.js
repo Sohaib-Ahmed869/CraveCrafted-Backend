@@ -1,8 +1,9 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const Schema = mongoose.Schema;
-const {userData} = require('../db');
+const { userData } = require('../db');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 const userSchema = new Schema({
   name: {
@@ -51,6 +52,8 @@ const userSchema = new Schema({
     enum: ['active', 'inactive', 'suspended', 'deleted'],
     default: 'active'
   },
+  resetPasswordToken: String,
+  resetPasswordExpire: Date,
   phone: {
     type: String,
     trim: true
@@ -66,16 +69,59 @@ const userSchema = new Schema({
   timestamps: true
 });
 
+// Generate and hash password reset token
+userSchema.methods.getResetPasswordToken = function() {
+  console.log('Generating reset token for user:', this.email);
+  
+  // Generate token
+  const resetToken = crypto.randomBytes(20).toString('hex');
+  console.log('Reset token generated');
+
+  // Hash token and set to resetPasswordToken field
+  this.resetPasswordToken = crypto
+    .createHash('sha256')
+    .update(resetToken)
+    .digest('hex');
+  console.log('Reset token hashed');
+
+  // Set expire
+  this.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+  console.log('Reset token expiration set to:', new Date(this.resetPasswordExpire));
+
+  return resetToken;
+};
+
 // Hash password before saving
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
-  this.password = await bcrypt.hash(this.password, 10);
-  next();
+  
+  try {
+    // Generate salt
+    const salt = await bcrypt.genSalt(10);
+    // Hash password
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Method to compare passwords
 userSchema.methods.comparePassword = async function(candidatePassword) {
-  return bcrypt.compare(candidatePassword, this.password);
+  try {
+    // If password is not selected, we need to select it first
+    if (!this.password) {
+      const user = await this.constructor.findById(this._id).select('+password');
+      if (!user) {
+        throw new Error('User not found');
+      }
+      return bcrypt.compare(candidatePassword, user.password);
+    }
+    return bcrypt.compare(candidatePassword, this.password);
+  } catch (error) {
+    console.error('Password comparison error:', error);
+    throw error;
+  }
 };
 
 // Method to generate JWT token
