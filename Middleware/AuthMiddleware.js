@@ -5,10 +5,10 @@ const User = require('../Models/Users');
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
-const generateToken = (userId, role) => {
+const generateToken = (id, role) => {
   return jwt.sign(
     { 
-      userId: userId,
+      id: id,
       role: role 
     },
     JWT_SECRET,
@@ -34,8 +34,23 @@ const publicRoute = (req, res, next) => {
 // Main authentication middleware
 const authenticateToken = async (req, res, next) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    console.log('Auth Headers:', req.headers);
+    const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+    
+    if (!authHeader) {
+      console.log('No authorization header found');
+      return res.status(401).json({
+        success: false,
+        message: 'Access token is required'
+      });
+    }
+
+    // Handle both "Bearer <token>" and raw token
+    const token = authHeader.startsWith('Bearer ') 
+      ? authHeader.split(' ')[1] 
+      : authHeader;
+
+    console.log('Extracted token:', token ? `${token.substring(0, 10)}...` : 'No token');
 
     if (!token) {
       return res.status(401).json({
@@ -44,44 +59,97 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
-    const decoded = verifyToken(token);
-    
-    const user = await User.findById(decoded.userId).select('-password');
-    if (!user || user.status !== 'active') {
+    let decoded;
+    try {
+      decoded = verifyToken(token);
+      console.log('Decoded token:', decoded);
+    } catch (err) {
+      console.error('Token verification failed:', err.message);
       return res.status(401).json({
         success: false,
-        message: 'User not found or inactive'
+        message: 'Invalid or expired token',
+        error: err.message
+      });
+    }
+    
+    // Handle both 'id' and 'userId' in the token
+    const userId = decoded.userId || decoded.id;
+    
+    if (!userId) {
+      console.log('No user ID found in token');
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token: No user ID found'
+      });
+    }
+    
+    const user = await User.findById(userId).select('-password');
+    if (!user) {
+      console.log('User not found for ID:', userId);
+      return res.status(401).json({
+        success: false,
+        message: 'User not found'
       });
     }
 
+    if (user.status !== 'active') {
+      console.log('User account is not active:', user.email);
+      return res.status(401).json({
+        success: false,
+        message: 'Your account is not active. Please contact support.'
+      });
+    }
+
+    // Attach user and token to the request
     req.user = user;
+    req.token = token;
+    
+    console.log('User authenticated successfully:', user.email);
     next();
   } catch (error) {
     console.error('Authentication error:', error);
-    return res.status(403).json({
+    return res.status(500).json({
       success: false,
-      message: 'Invalid or expired token'
+      message: 'Authentication failed',
+      error: error.message
     });
   }
 };
 
 // Admin role middleware
 const requireAdmin = (req, res, next) => {
-  if (!req.user) {
-    return res.status(401).json({
-      success: false,
-      message: 'Authentication required'
-    });
-  }
+  try {
+    console.log('requireAdmin - Checking user:', req.user ? req.user.email : 'No user');
+    
+    if (!req.user) {
+      console.log('requireAdmin - No user found in request');
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
 
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({
+    console.log('requireAdmin - User role:', req.user.role);
+    
+    if (req.user.role !== 'admin') {
+      console.log('requireAdmin - Access denied: User is not an admin');
+      return res.status(403).json({
+        success: false,
+        message: 'Admin access required',
+        userRole: req.user.role
+      });
+    }
+
+    console.log('requireAdmin - User is admin, access granted');
+    next();
+  } catch (error) {
+    console.error('requireAdmin - Error:', error);
+    res.status(500).json({
       success: false,
-      message: 'Admin access required'
+      message: 'Server error during admin verification',
+      error: error.message
     });
   }
-  
-  next();
 };
 
 // User role middleware

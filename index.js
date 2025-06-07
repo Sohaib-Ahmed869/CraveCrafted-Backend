@@ -23,12 +23,42 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // CORS configuration
-app.use(
-  cors({
-    origin: [process.env.CORS_ORIGIN || 'http://localhost:3000', 'http://localhost:5173'],
-    credentials: true,
-  })
-);
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173'
+];
+
+// Add CORS_ORIGIN to allowedOrigins if it exists and is a valid URL
+if (process.env.CORS_ORIGIN) {
+  try {
+    const corsUrl = new URL(process.env.CORS_ORIGIN);
+    allowedOrigins.push(corsUrl.origin);
+  } catch (err) {
+    console.warn('Invalid CORS_ORIGIN URL:', process.env.CORS_ORIGIN);
+  }
+}
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn('CORS blocked for origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
+};
+
+// Apply CORS to all routes
+app.use(cors(corsOptions));
 
 // Connect to database
 connectDB();
@@ -37,11 +67,13 @@ connectDB();
 const authRoutes = require('./Routes/AuthRoutes');
 const userRoutes = require('./Routes/UserRoutes');
 const testRoutes = require('./Routes/TestRoutes');
+const bannerRoutes = require('./Routes/bannerRoutes');
 
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/test', testRoutes);
+app.use('/api/banners', bannerRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
