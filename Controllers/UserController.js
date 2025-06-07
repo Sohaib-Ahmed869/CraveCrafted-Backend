@@ -444,6 +444,28 @@ const getAllUsers = async (req, res) => {
   }
 };
 
+// Get total users count excluding admins
+const getTotalUsersCount = async (req, res) => {
+  try {
+    const totalUsers = await User.countDocuments({ role: 'user' });
+    
+    res.status(200).json({
+      success: true,
+      message: 'Total users count retrieved successfully',
+      data: {
+        totalUsers
+      }
+    });
+
+  } catch (error) {
+    console.error('Get total users count error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -451,5 +473,6 @@ module.exports = {
   getProfile,
   updateProfile,
   changePassword,
-  getAllUsers
+  getAllUsers,
+  getTotalUsersCount
 };

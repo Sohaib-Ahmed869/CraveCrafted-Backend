@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticateToken, requireAdmin } = require('../Middleware/authMiddleware');
+const { authenticateToken, requireAdmin } = require('../Middleware/AuthMiddleware');
 const { bannerUpload } = require('../config/s3');
 const bannerController = require('../Controllers/bannerController');
 

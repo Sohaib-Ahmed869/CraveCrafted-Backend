@@ -9,7 +9,8 @@ const {
   getProfile,
   updateProfile,
   changePassword,
-  getAllUsers
+  getAllUsers,
+  getTotalUsersCount
 } = require('../Controllers/UserController');
 const {
   authenticateToken,
@@ -26,6 +27,7 @@ router.put('/profile', authenticateToken, updateProfile);
 router.put('/change-password', authenticateToken, changePassword);
 
 router.get('/all', authenticateToken, requireAdmin, getAllUsers);
+router.get('/total-count', authenticateToken, requireAdmin, getTotalUsersCount);
 
 router.get('/:userId', authenticateToken, requireOwnershipOrAdmin, async (req, res) => {
   try {

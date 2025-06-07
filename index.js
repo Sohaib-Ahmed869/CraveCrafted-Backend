@@ -68,12 +68,14 @@ const authRoutes = require('./Routes/AuthRoutes');
 const userRoutes = require('./Routes/UserRoutes');
 const testRoutes = require('./Routes/TestRoutes');
 const bannerRoutes = require('./Routes/bannerRoutes');
+const productRoutes = require('./Routes/ProductRoutes');
 
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/test', testRoutes);
 app.use('/api/banners', bannerRoutes);
+app.use('/api/products', productRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

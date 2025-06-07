@@ -6,52 +6,34 @@ const { deleteS3Object } = require('../config/s3');
 // @access  Private/Admin
 exports.createBanner = async (req, res) => {
   try {
-    console.log('Request files:', req.files);
-    console.log('Request file:', req.file);
-    console.log('Request body:', req.body);
+    const { title, description, link, order } = req.body;
     
     if (!req.file) {
-      console.error('No file uploaded');
-      return res.status(400).json({ 
-        success: false,
-        message: 'Banner image is required' 
-      });
+      return res.status(400).json({ message: 'Banner image is required' });
     }
 
-    console.log('Uploaded file info:', {
-      originalname: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: req.file.size,
-      location: req.file.location,
-      key: req.file.key
-    });
-
     const banner = new Banner({
+      title,
+      description,
       image: req.file.location,
-      imagePath: req.file.key
+      imagePath: req.file.key,
+      link: link || '',
+      order: order || 0
     });
 
-    console.log('Creating banner with data:', banner);
-    const savedBanner = await banner.save();
-    console.log('Banner created successfully:', savedBanner);
+    await banner.save();
     
     res.status(201).json({
       success: true,
       message: 'Banner created successfully',
-      banner: savedBanner
+      banner
     });
   } catch (error) {
-    console.error('Error creating banner:', {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      name: error.name,
-      errors: error.errors
-    });
+    console.error('Error creating banner:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error during banner creation',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+      message: 'Server error',
+      error: error.message
     });
   }
 };
@@ -61,7 +43,7 @@ exports.createBanner = async (req, res) => {
 // @access  Public
 exports.getBanners = async (req, res) => {
   try {
-    const banners = await Banner.find().sort({ createdAt: -1 });
+    const banners = await Banner.find().sort({ order: 1, createdAt: -1 });
     res.json({
       success: true,
       count: banners.length,
@@ -82,34 +64,28 @@ exports.getBanners = async (req, res) => {
 // @access  Private/Admin
 exports.updateBanner = async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'No image file provided for update' 
-      });
+    const { title, description, link, isActive, order } = req.body;
+    const updateData = { title, description, link, isActive, order };
+
+    // If new image is uploaded
+    if (req.file) {
+      updateData.image = req.file.location;
+      updateData.imagePath = req.file.key;
     }
 
     const banner = await Banner.findByIdAndUpdate(
       req.params.id,
-      { 
-        $set: {
-          image: req.file.location,
-          imagePath: req.file.key
-        } 
-      },
+      { $set: updateData },
       { new: true, runValidators: true }
     );
 
     if (!banner) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Banner not found' 
-      });
+      return res.status(404).json({ message: 'Banner not found' });
     }
 
     res.json({
       success: true,
-      message: 'Banner image updated successfully',
+      message: 'Banner updated successfully',
       data: banner
     });
   } catch (error) {
@@ -130,21 +106,13 @@ exports.deleteBanner = async (req, res) => {
     const banner = await Banner.findById(req.params.id);
     
     if (!banner) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Banner not found' 
-      });
+      return res.status(404).json({ message: 'Banner not found' });
     }
 
     // Delete the image from S3
-    try {
-      await deleteS3Object(banner.imagePath);
-    } catch (s3Error) {
-      console.error('Error deleting from S3:', s3Error);
-      // Continue with database deletion even if S3 deletion fails
-    }
+    await deleteS3Object(banner.imagePath);
     
-    // Delete from database
+    // Delete from database using findByIdAndDelete
     await Banner.findByIdAndDelete(req.params.id);
     
     res.json({
@@ -155,7 +123,7 @@ exports.deleteBanner = async (req, res) => {
     console.error('Error deleting banner:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete banner',
+      message: 'Server error',
       error: error.message
     });
   }
@@ -166,8 +134,8 @@ exports.deleteBanner = async (req, res) => {
 // @access  Public
 exports.getActiveBanners = async (req, res) => {
   try {
-    const banners = await Banner.find()
-      .sort({ createdAt: -1 })
+    const banners = await Banner.find({ isActive: true })
+      .sort({ order: 1, createdAt: -1 })
       .select('-imagePath -__v -createdAt -updatedAt');
       
     res.json({
