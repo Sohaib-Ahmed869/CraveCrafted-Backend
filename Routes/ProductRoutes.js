@@ -6,12 +6,16 @@ const {
   createProduct,
   updateProduct,
   deleteProduct,
-  getProduct
+  getProduct,
+  getFeaturedProducts,
+  getTotalProductsCount
 } = require('../Controllers/ProductController');
 const { authenticateToken, requireAdmin } = require('../Middleware/AuthMiddleware');
 
 // Public routes
 router.get('/', getAllProducts);
+router.get('/featured', getFeaturedProducts);
+router.get('/total-count', getTotalProductsCount);
 router.get('/:id', getProduct);
 
 // Admin routes

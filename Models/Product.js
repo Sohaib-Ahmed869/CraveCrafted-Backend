@@ -50,6 +50,10 @@ const productSchema = new Schema({
     type: String,
     enum: ['active', 'inactive'],
     default: 'active'
+  },
+  featured: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true

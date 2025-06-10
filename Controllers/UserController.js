@@ -160,7 +160,8 @@ const googleLogin = async (req, res) => {
       });
     }
 
-    let user = await User.findOne({ 
+    // Find user by email or Google ID
+    let user = await User.findOne({
       $or: [
         { email: email.toLowerCase().trim() },
         { 'socialLogin.google.id': googleId }
@@ -168,6 +169,7 @@ const googleLogin = async (req, res) => {
     });
 
     if (user) {
+      // Update existing user's Google info if needed
       if (!user.socialLogin.enabled) {
         user.socialLogin.enabled = true;
         user.socialLogin.google.id = googleId;
@@ -188,7 +190,7 @@ const googleLogin = async (req, res) => {
           }
         },
         status: 'active',
-        role: 'customer',
+        role: 'user',
         lastLogin: new Date()
       });
       await user.save();
@@ -215,7 +217,8 @@ const googleLogin = async (req, res) => {
     console.error('Google login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error during Google login'
+      message: 'Internal server error during Google login',
+      error: error.message
     });
   }
 };

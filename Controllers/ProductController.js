@@ -244,11 +244,57 @@ const getProduct = async (req, res) => {
   }
 };
 
+// Get featured products
+const getFeaturedProducts = async (req, res) => {
+  try {
+    const featuredProducts = await Product.find({ featured: true, status: 'active' })
+      .sort({ createdAt: -1 })
+      .limit(6);
+
+    res.status(200).json({
+      success: true,
+      message: 'Featured products retrieved successfully',
+      data: { products: featuredProducts }
+    });
+
+  } catch (error) {
+    console.error('Get featured products error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+// Get total products count
+const getTotalProductsCount = async (req, res) => {
+  try {
+    const totalProducts = await Product.countDocuments();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Total products count retrieved successfully',
+      data: {
+        totalProducts
+      }
+    });
+
+  } catch (error) {
+    console.error('Get total products count error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   upload,
   getAllProducts,
   createProduct,
   updateProduct,
   deleteProduct,
-  getProduct
+  getProduct,
+  getFeaturedProducts,
+  getTotalProductsCount
 }; 
