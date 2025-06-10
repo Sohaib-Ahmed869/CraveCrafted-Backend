@@ -69,6 +69,7 @@ const userRoutes = require('./Routes/UserRoutes');
 const testRoutes = require('./Routes/TestRoutes');
 const bannerRoutes = require('./Routes/bannerRoutes');
 const productRoutes = require('./Routes/ProductRoutes');
+const orderRoutes = require('./Routes/orderRoutes');
 
 // API routes
 app.use('/api/auth', authRoutes);
@@ -76,13 +77,15 @@ app.use('/api/users', userRoutes);
 app.use('/api/test', testRoutes);
 app.use('/api/banners', bannerRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/orders', orderRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({
     success: false,
-    message: 'Something went wrong!'
+    message: 'Something went wrong!',
+    error: err.message
   });
 });
 
