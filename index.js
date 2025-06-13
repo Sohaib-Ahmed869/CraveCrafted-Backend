@@ -70,6 +70,7 @@ const testRoutes = require('./Routes/TestRoutes');
 const bannerRoutes = require('./Routes/bannerRoutes');
 const productRoutes = require('./Routes/ProductRoutes');
 const orderRoutes = require('./Routes/orderRoutes');
+const blogRoutes = require('./Routes/blogRoutes');
 
 // API routes
 app.use('/api/auth', authRoutes);
@@ -79,6 +80,8 @@ app.use('/api/banners', bannerRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 
+// Routes
+app.use('/api/blogs', blogRoutes); 
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
