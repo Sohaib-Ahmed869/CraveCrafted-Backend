@@ -199,7 +199,7 @@ const deleteProduct = async (req, res) => {
     }));
 
     // Delete product from database
-    await product.remove();
+    await Product.deleteOne({ _id: id });
 
     res.status(200).json({
       success: true,

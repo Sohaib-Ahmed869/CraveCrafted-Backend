@@ -30,6 +30,19 @@ const orderSchema = mongoose.Schema(
       type: String,
       required: true,
     },
+    // Stripe payment fields
+    paymentIntent: {
+      id: { type: String },
+      status: { type: String },
+      clientSecret: { type: String },
+      error: { type: String }, // Added for payment errors
+    },
+    paymentResult: {
+      id: { type: String },
+      status: { type: String },
+      updateTime: { type: String },
+      emailAddress: { type: String },
+    },
     itemsPrice: {
       type: Number,
       required: true,
@@ -50,10 +63,26 @@ const orderSchema = mongoose.Schema(
       required: true,
       default: 0.0,
     },
+    isPaid: {
+      type: Boolean,
+      required: true,
+      default: false,
+    },
+    paidAt: {
+      type: Date,
+    },
+    isDelivered: {
+      type: Boolean,
+      required: true,
+      default: false,
+    },
+    deliveredAt: {
+      type: Date,
+    },
     status: {
       type: String,
       required: true,
-      enum: ['Pending', 'Processing', 'Completed', 'Cancelled'],
+      enum: ['Pending', 'Processing', 'Paid', 'Shipped', 'Delivered', 'Cancelled', 'Payment Failed'],
       default: 'Pending',
     },
   },
@@ -64,4 +93,4 @@ const orderSchema = mongoose.Schema(
 
 const Order = mongoose.model('Order', orderSchema);
 
-module.exports = Order; 
+module.exports = Order;

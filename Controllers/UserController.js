@@ -1,5 +1,5 @@
-const bcrypt = require('bcryptjs');
 const User = require('../Models/Users'); 
+const bcrypt = require('bcryptjs');
 const { generateToken } = require('../Middleware/AuthMiddleware');
 
 const register = async (req, res) => {
@@ -89,65 +89,86 @@ const register = async (req, res) => {
   };
   
 
-const login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email and password are required'
-      });
-    }
-    const user = await User.findOne({ 
-      email: email.toLowerCase().trim(),
-      status: { $in: ['active'] }
-    }).select('+password');
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password'
-      });
-    }
-    if (!user.password) {
-      return res.status(401).json({
-        success: false,
-        message: 'Please login using your social account or reset your password'
-      });
-    }
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid Password'
-      });
-    }
-    await User.findByIdAndUpdate(user._id, { 
-      lastLogin: new Date() 
-    });
-
-    const token = generateToken(user._id, user.role);
-    const userResponse = user.toObject();
-    delete userResponse.password;
-
-    res.status(200).json({
-      success: true,
-      message: 'Login successful',
-      data: {
-        user: userResponse,
-        token: token,
-        tokenType: 'Bearer'
+  const login = async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      
+      if (!email || !password) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Email and password are required' 
+        });
       }
-    });
-
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error during login'
-    });
-  }
-};
+  
+      const normalizedEmail = email.toLowerCase().trim();
+      const rawPassword = password.trim();
+      
+      console.log("🔐 Login attempt:");
+      console.log("Email:", normalizedEmail);
+      console.log("Password length:", rawPassword.length);
+  
+      // Fetch user including the password field
+      const user = await User
+        .findOne({ email: normalizedEmail, status: 'active' })
+        .select('+password');
+      
+      console.log("User found:", !!user);
+      
+      if (!user) {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Invalid email or password' 
+        });
+      }
+  
+      console.log("User has password:", !!user.password);
+      console.log("Password starts with $2:", user.password?.startsWith('$2'));
+  
+      // Use the model's comparePassword method
+      const isMatch = await user.comparePassword(rawPassword);
+      
+      if (!isMatch) {
+        console.log("❌ Password comparison failed");
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Invalid email or password' 
+        });
+      }
+  
+      console.log("✅ Password comparison successful");
+  
+      // FIXED: Update last login using findByIdAndUpdate to avoid triggering pre-save
+      await User.findByIdAndUpdate(
+        user._id, 
+        { lastLogin: new Date() },
+        { validateBeforeSave: false } // This prevents validation and pre-save hooks
+      );
+  
+      // Generate token
+      const token = generateToken(user._id, user.role);
+      const payload = user.toObject();
+      delete payload.password;
+  
+      return res.status(200).json({
+        success: true,
+        message: 'Login successful',
+        data: {
+          user: payload,
+          token,
+          tokenType: 'Bearer'
+        }
+      });
+  
+    } catch (err) {
+      console.error('❌ Login error:', err);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Internal server error during login' 
+      });
+    }
+  };
+  
+  
 
 const googleLogin = async (req, res) => {
   try {

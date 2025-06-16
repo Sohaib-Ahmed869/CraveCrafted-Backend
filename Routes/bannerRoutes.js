@@ -10,7 +10,7 @@ router.get('/active', bannerController.getActiveBanners);
 
 // Protected Admin routes
 router.post('/', authenticateToken, requireAdmin, bannerUpload.single('image'), bannerController.createBanner);
-router.put('/:id', authenticateToken, requireAdmin, bannerUpload.single('image'), bannerController.updateBanner);
+router.patch('/:id', authenticateToken, requireAdmin, bannerUpload.single('image'), bannerController.updateBanner);
 router.delete('/:id', authenticateToken, requireAdmin, bannerController.deleteBanner);
 
 module.exports = router;

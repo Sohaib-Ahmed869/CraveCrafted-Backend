@@ -5,7 +5,9 @@ const {
   getOrders,
   getOrderById,
   updateOrderStatus,
-  getMyOrders
+  getMyOrders,
+  cancelOrder,
+  deleteOrder
 } = require('../Controllers/orderController');
 const { authenticateToken, requireAdmin } = require('../Middleware/AuthMiddleware');
 
@@ -23,5 +25,8 @@ router.get('/:id', authenticateToken, getOrderById);
 
 // Update order status (admin only)
 router.put('/:id/status', authenticateToken, requireAdmin, updateOrderStatus);
+router.put('/:id/cancel', authenticateToken, cancelOrder);
+router.delete('/:id', authenticateToken, requireAdmin, deleteOrder);
+
 
 module.exports = router; 

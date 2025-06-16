@@ -1,9 +1,6 @@
 const Banner = require('../Models/Banner');
 const { deleteS3Object } = require('../config/s3');
 
-// @desc    Create a new banner
-// @route   POST /api/banners
-// @access  Private/Admin
 exports.createBanner = async (req, res) => {
   try {
     const { title, description, link, order } = req.body;
@@ -37,10 +34,6 @@ exports.createBanner = async (req, res) => {
     });
   }
 };
-
-// @desc    Get all banners
-// @route   GET /api/banners
-// @access  Public
 exports.getBanners = async (req, res) => {
   try {
     const banners = await Banner.find().sort({ order: 1, createdAt: -1 });
@@ -58,10 +51,6 @@ exports.getBanners = async (req, res) => {
     });
   }
 };
-
-// @desc    Update banner
-// @route   PUT /api/banners/:id
-// @access  Private/Admin
 exports.updateBanner = async (req, res) => {
   try {
     const { title, description, link, isActive, order } = req.body;
@@ -97,10 +86,6 @@ exports.updateBanner = async (req, res) => {
     });
   }
 };
-
-// @desc    Delete banner
-// @route   DELETE /api/banners/:id
-// @access  Private/Admin
 exports.deleteBanner = async (req, res) => {
   try {
     const banner = await Banner.findById(req.params.id);
@@ -128,10 +113,6 @@ exports.deleteBanner = async (req, res) => {
     });
   }
 };
-
-// @desc    Get active banners for hero section
-// @route   GET /api/banners/active
-// @access  Public
 exports.getActiveBanners = async (req, res) => {
   try {
     const banners = await Banner.find({ isActive: true })

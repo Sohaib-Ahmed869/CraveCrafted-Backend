@@ -1,7 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const Schema = mongoose.Schema;
-const { userData } = require('../db');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
@@ -73,35 +72,43 @@ const userSchema = new Schema({
 userSchema.methods.getResetPasswordToken = function() {
   console.log('Generating reset token for user:', this.email);
   
-  // Generate token
   const resetToken = crypto.randomBytes(20).toString('hex');
   console.log('Reset token generated');
-
-  // Hash token and set to resetPasswordToken field
+ 
   this.resetPasswordToken = crypto
     .createHash('sha256')
     .update(resetToken)
     .digest('hex');
   console.log('Reset token hashed');
-
-  // Set expire
+ 
   this.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
   console.log('Reset token expiration set to:', new Date(this.resetPasswordExpire));
-
+ 
   return resetToken;
 };
 
-// Hash password before saving
+// FIXED: Hash password before saving - Only when password is actually modified
 userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
+  // Only hash if password is being modified AND it's not already hashed
+  if (!this.isModified('password')) {
+    console.log('Password not modified, skipping hash');
+    return next();
+  }
+  
+  // Check if password is already hashed (starts with $2a, $2b, $2x, $2y)
+  if (this.password && this.password.match(/^\$2[abxy]\$/)) {
+    console.log('Password already hashed, skipping hash');
+    return next();
+  }
   
   try {
-    // Generate salt
-    const salt = await bcrypt.genSalt(10);
-    // Hash password
+    console.log('Hashing password for user:', this.email);
+    const salt = await bcrypt.genSalt(12);
     this.password = await bcrypt.hash(this.password, salt);
+    console.log('Password hashed successfully');
     next();
   } catch (error) {
+    console.error('Error hashing password:', error);
     next(error);
   }
 });
@@ -109,18 +116,30 @@ userSchema.pre('save', async function(next) {
 // Method to compare passwords
 userSchema.methods.comparePassword = async function(candidatePassword) {
   try {
-    // If password is not selected, we need to select it first
-    if (!this.password) {
-      const user = await this.constructor.findById(this._id).select('+password');
-      if (!user) {
-        throw new Error('User not found');
+    console.log('comparePassword called');
+    
+    let passwordToCompare = this.password;
+    
+    if (!passwordToCompare) {
+      console.log('Password not in current document, fetching...');
+      const userWithPassword = await this.constructor.findById(this._id).select('+password');
+      if (!userWithPassword || !userWithPassword.password) {
+        console.log('No password found for user');
+        return false;
       }
-      return bcrypt.compare(candidatePassword, user.password);
+      passwordToCompare = userWithPassword.password;
     }
-    return bcrypt.compare(candidatePassword, this.password);
+    
+    console.log('Password hash to compare against:', passwordToCompare.substring(0, 20) + '...');
+    console.log('Candidate password length:', candidatePassword.length);
+    
+    const result = await bcrypt.compare(candidatePassword, passwordToCompare);
+    console.log('Password comparison result:', result);
+    return result;
+    
   } catch (error) {
     console.error('Password comparison error:', error);
-    throw error;
+    return false;
   }
 };
 
@@ -138,4 +157,4 @@ userSchema.methods.generateAuthToken = function() {
   );
 };
 
-module.exports = userData.model('User', userSchema);
+module.exports = mongoose.model('User', userSchema);
