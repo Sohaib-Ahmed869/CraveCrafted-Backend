@@ -3,32 +3,21 @@ const cors = require('cors');
 const helmet = require('helmet');
 const { connectDB } = require('./db');
 const dotenv = require("dotenv");
-const rateLimit = require('express-rate-limit');
 
 // Load environment variables
 dotenv.config();
-
 // Create Express app
 const app = express();
-
 // Security middleware
 app.use(helmet());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
 
 // CORS configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173'
 ];
-
 // Add CORS_ORIGIN to allowedOrigins if it exists and is a valid URL
 if (process.env.CORS_ORIGIN) {
   try {
@@ -38,12 +27,10 @@ if (process.env.CORS_ORIGIN) {
     console.warn('Invalid CORS_ORIGIN URL:', process.env.CORS_ORIGIN);
   }
 }
-
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -57,16 +44,13 @@ const corsOptions = {
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   optionsSuccessStatus: 200 // Some legacy browsers choke on 204
 };
-
 // Apply CORS to all routes
 app.use(cors({
   origin: true,
   credentials: true
 }));
-
 // Connect to database
 connectDB();
-
 // Routes
 const authRoutes = require('./Routes/AuthRoutes');
 const userRoutes = require('./Routes/UserRoutes');
@@ -77,7 +61,6 @@ const orderRoutes = require('./Routes/orderRoutes');
 const blogRoutes = require('./Routes/blogRoutes');
 const ReviewRoutes=require("./Routes/ReviewRouter")
 const contactRoutes = require('./Routes/ContactRoutes');
-
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -85,14 +68,12 @@ app.use('/api/test', testRoutes);
 app.use('/api/banners', bannerRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
-app.use('/api/blogs', blogRoutes); 
+app.use('/api/blogs', blogRoutes);
 app.use('/api/review', ReviewRoutes)
 app.use('/api/contacts', contactRoutes);
-
 // Error handling middlewares
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  
   // Handle payload too large errors specifically
   if (err.type === 'entity.too.large') {
     return res.status(413).json({
@@ -101,7 +82,6 @@ app.use((err, req, res, next) => {
       error: 'Payload size limit exceeded'
     });
   }
-  
   // Handle CORS errors
   if (err.message === 'Not allowed by CORS') {
     return res.status(403).json({
@@ -110,40 +90,34 @@ app.use((err, req, res, next) => {
       error: err.message
     });
   }
-  
   res.status(500).json({
     success: false,
     message: 'Something went wrong!',
     error: err.message
   });
 });
-
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received. Shutting down gracefully...');
   process.exit(0);
-}); 
-
+});
 process.on('SIGINT', () => {
   console.log('SIGINT received. Shutting down gracefully...');
   process.exit(0);
 });
-
 // Start server
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌐 API Base URL: http://localhost:${PORT}`);
+  console.log(`:rocket: Server running on port ${PORT}`);
+  console.log(`:mobile_phone: Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`:globe_with_meridians: API Base URL: http://localhost:${PORT}`);
 });
-
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`❌ Port ${PORT} is already in use`);
+    console.error(`:x: Port ${PORT} is already in use`);
   } else {
-    console.error('❌ Server error:', err);
+    console.error(':x: Server error:', err);
   }
   process.exit(1);
 });
-
-module.exports = app; 
+module.exports = app;
