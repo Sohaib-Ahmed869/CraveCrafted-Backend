@@ -1,6 +1,8 @@
 const User = require('../Models/Users'); 
 const bcrypt = require('bcryptjs');
 const { generateToken } = require('../Middleware/AuthMiddleware');
+const Review = require('../Models/Review');
+const Order = require('../Models/Order');
 
 const register = async (req, res) => {
     try {
@@ -42,7 +44,7 @@ const register = async (req, res) => {
         name: name.trim(),
         email: email.toLowerCase().trim(),
         password: hashedPassword,
-        role: role || 'customer',
+        role: role || 'user',
         status: 'active'
       });
       const savedUser = await newUser.save();
@@ -490,6 +492,99 @@ const getTotalUsersCount = async (req, res) => {
   }
 };
 
+// Get all non-admin users
+const getAllNonAdminUsers = async (req, res) => {
+  try {
+    const { status, search } = req.query;
+    
+    // Build filter object - exclude admin users
+    const filter = { role: { $ne: 'admin' } };
+    if (status) filter.status = status;
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Get all non-admin users
+    const users = await User.find(filter)
+      .select('-password')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      message: 'Non-admin users retrieved successfully',
+      data: {
+        users,
+        totalUsers: users.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Get non-admin users error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+// Get individual customer details
+const getCustomerDetails = async (req, res) => {
+  try {
+    const { customerId } = req.params;
+
+    // Get customer details
+    const customer = await User.findOne({
+      _id: customerId,
+      role: { $ne: 'admin' }
+    }).select('-password');
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found'
+      });
+    }
+
+    // Get customer's reviews
+    const reviews = await Review.find({ userId: customerId })
+      .populate('productId', 'title image')
+      .sort({ createdAt: -1 });
+
+    // Get customer's orders
+    const orders = await Order.find({ user: customerId })
+      .populate('orderItems.product', 'title image')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      message: 'Customer details retrieved successfully',
+      data: {
+        customer,
+        reviews,
+        orders
+      }
+    });
+
+  } catch (error) {
+    console.error('Get customer details error:', error);
+    
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid customer ID format'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -498,5 +593,7 @@ module.exports = {
   updateProfile,
   changePassword,
   getAllUsers,
-  getTotalUsersCount
+  getTotalUsersCount,
+  getAllNonAdminUsers,
+  getCustomerDetails
 };

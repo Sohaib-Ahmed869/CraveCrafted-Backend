@@ -13,7 +13,8 @@ const app = express();
 
 // Security middleware
 app.use(helmet());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -58,7 +59,10 @@ const corsOptions = {
 };
 
 // Apply CORS to all routes
-app.use(cors(corsOptions));
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
 
 // Connect to database
 connectDB();
@@ -72,6 +76,7 @@ const productRoutes = require('./Routes/ProductRoutes');
 const orderRoutes = require('./Routes/orderRoutes');
 const blogRoutes = require('./Routes/blogRoutes');
 const ReviewRoutes=require("./Routes/ReviewRouter")
+const contactRoutes = require('./Routes/ContactRoutes');
 
 // API routes
 app.use('/api/auth', authRoutes);
@@ -82,9 +87,30 @@ app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/blogs', blogRoutes); 
 app.use('/api/review', ReviewRoutes)
+app.use('/api/contacts', contactRoutes);
+
 // Error handling middlewares
 app.use((err, req, res, next) => {
   console.error(err.stack);
+  
+  // Handle payload too large errors specifically
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      message: 'Request payload too large. Please reduce the content size.',
+      error: 'Payload size limit exceeded'
+    });
+  }
+  
+  // Handle CORS errors
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      success: false,
+      message: 'CORS error: Origin not allowed',
+      error: err.message
+    });
+  }
+  
   res.status(500).json({
     success: false,
     message: 'Something went wrong!',

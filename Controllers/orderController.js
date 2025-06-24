@@ -1,6 +1,7 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const Order = require('../Models/Order');
 const User = require('../Models/Users');
+const Review = require('../Models/Review');
 
 const createOrder = async (req, res) => {
   try {
@@ -12,36 +13,51 @@ const createOrder = async (req, res) => {
       taxPrice,
       shippingPrice,
       totalPrice,
-      paymentDetails, // New field for card details
+      paymentDetails,
+      notes
     } = req.body;
 
-    // Validation checks
+    // Enhanced validation checks
     if (!orderItems || orderItems.length === 0) {
-      return res.status(400).json({ message: 'No order items provided' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'No order items provided' 
+      });
     }
 
     if (!shippingAddress || !shippingAddress.address || !shippingAddress.city || 
-        !shippingAddress.postalCode || !shippingAddress.country) {
-      return res.status(400).json({ message: 'Complete shipping address is required' });
+        !shippingAddress.postalCode) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Complete shipping address is required' 
+      });
     }
 
     if (!paymentMethod) {
-      return res.status(400).json({ message: 'Payment method is required' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Payment method is required' 
+      });
     }
 
-    if (totalPrice <= 0) {
-      return res.status(400).json({ message: 'Total price must be greater than 0' });
+    if (!totalPrice || totalPrice <= 0) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Total price must be greater than 0' 
+      });
     }
 
     // Validate order items structure
     for (const item of orderItems) {
       if (!item.name || !item.price || !item.quantity || !item.product) {
         return res.status(400).json({ 
+          success: false,
           message: 'Each order item must have name, price, quantity, and product ID' 
         });
       }
       if (item.quantity <= 0) {
         return res.status(400).json({ 
+          success: false,
           message: 'Order item quantity must be greater than 0' 
         });
       }
@@ -49,28 +65,61 @@ const createOrder = async (req, res) => {
 
     console.log(`Creating order for user: ${req.user._id}, Payment method: ${paymentMethod}`);
 
-    // Create the order first
-    const order = await Order.create({
+    // Determine payment type
+    const isCashOnDelivery = ['cash_on_delivery', 'cod'].includes(paymentMethod.toLowerCase());
+    
+    // Create the order
+    const orderData = {
       orderItems,
       user: req.user._id,
       shippingAddress,
-      paymentMethod,
-      itemsPrice,
-      taxPrice,
-      shippingPrice,
+      paymentMethod: paymentMethod.toLowerCase(),
+      itemsPrice: itemsPrice || 0,
+      taxPrice: taxPrice || 0,
+      shippingPrice: shippingPrice || 0,
       totalPrice,
       status: 'Pending',
-    });
+      notes,
+      statusHistory: [{
+        status: 'Pending',
+        timestamp: new Date(),
+        note: 'Order placed successfully',
+        updatedBy: req.user._id
+      }]
+    };
 
+    // Set COD details if cash on delivery
+    if (isCashOnDelivery) {
+      orderData.codDetails = {
+        amountToCollect: totalPrice
+      };
+      orderData.paymentType = 'cash_on_delivery';
+    }
+
+    const order = await Order.create(orderData);
     console.log(`Order created with ID: ${order._id}`);
 
-    // Handle Stripe payment integration for card payments
-    if (paymentMethod.toLowerCase() === 'stripe' || 
-        paymentMethod.toLowerCase() === 'card' || 
-        paymentMethod.toLowerCase() === 'credit_card' ||
-        paymentMethod.toLowerCase() === 'debit_card') {
-      
-      // Validate payment details for card payments
+    // Handle different payment methods
+    if (isCashOnDelivery) {
+      // For Cash on Delivery - automatically confirm order
+      order.status = 'Payment_Confirmed';
+      order.statusHistory.push({
+        status: 'Payment_Confirmed',
+        timestamp: new Date(),
+        note: 'Cash on delivery order confirmed',
+        updatedBy: req.user._id
+      });
+      await order.save();
+
+      return res.status(201).json({
+        success: true,
+        message: 'Order placed successfully! Payment will be collected upon delivery.',
+        order,
+        orderId: order._id
+      });
+
+    } else if (['stripe', 'card', 'credit_card', 'debit_card'].includes(paymentMethod.toLowerCase())) {
+      // Handle Stripe payment
       if (!paymentDetails) {
         return res.status(400).json({ 
           success: false,
@@ -88,50 +137,29 @@ const createOrder = async (req, res) => {
       }
 
       try {
-        console.log('Processing Stripe payment with card details...');
+        console.log('Processing Stripe payment...');
         
-        // Get user details for payment intent
         const user = await User.findById(req.user._id);
 
-        // ALWAYS use test payment method tokens for security and compliance
-        let paymentMethodId;
-        
-        // Map test card numbers to Stripe test payment method tokens
+        // Map test card numbers to payment method IDs
         const testPaymentMethods = {
-          '4242424242424242': 'pm_card_visa', // Visa - Success
-          '5555555555554444': 'pm_card_mastercard', // Mastercard - Success
-          '378282246310005': 'pm_card_amex', // Amex - Success
-          '6011111111111117': 'pm_card_discover', // Discover - Success
-          '30569309025904': 'pm_card_diners', // Diners - Success
-          '4000000000000002': 'pm_card_visa_debit', // Generic decline
-          '4000000000009995': 'pm_card_chargeDeclined', // Insufficient funds
-          '4000000000009987': 'pm_card_lost', // Lost card
-          '4000000000009979': 'pm_card_stolen', // Stolen card
-          '4000000000000069': 'pm_card_expired', // Expired card
-          '4000000000000127': 'pm_card_incorrectCvc', // Incorrect CVC
+          '4242424242424242': 'pm_card_visa',
+          '5555555555554444': 'pm_card_mastercard',
+          '378282246310005': 'pm_card_amex',
+          '6011111111111117': 'pm_card_discover'
         };
 
         const cleanCardNumber = cardNumber.replace(/\s/g, '');
+        const paymentMethodId = testPaymentMethods[cleanCardNumber] || 'pm_card_visa';
         
-        // Use test payment method tokens (this is the secure way)
-        paymentMethodId = testPaymentMethods[cleanCardNumber];
-        
-        if (!paymentMethodId) {
-          // For any other card numbers, use default successful Visa
-          paymentMethodId = 'pm_card_visa';
-          console.log(`Unknown card number, using default Visa token for card ending in: ${cleanCardNumber.slice(-4)}`);
-        } else {
-          console.log(`Using test payment method: ${paymentMethodId} for card ending in: ${cleanCardNumber.slice(-4)}`);
-        }
-        
-        // Create and confirm payment intent with test token
+        // Create payment intent
         const paymentIntent = await stripe.paymentIntents.create({
-          amount: Math.round(totalPrice * 100), // Convert to cents
+          amount: Math.round(totalPrice * 100),
           currency: process.env.STRIPE_CURRENCY || 'usd',
           payment_method: paymentMethodId,
           confirmation_method: 'manual',
           confirm: true,
-          return_url: 'https://your-website.com/return',
+          return_url: `${process.env.FRONTEND_URL || 'http://localhost:3001'}/order-success`,
           metadata: {
             orderId: order._id.toString(),
             userId: req.user._id.toString(),
@@ -145,7 +173,7 @@ const createOrder = async (req, res) => {
               line1: shippingAddress.address,
               city: shippingAddress.city,
               postal_code: shippingAddress.postalCode,
-              country: shippingAddress.country,
+              country: shippingAddress.country || 'US',
             },
           },
         });
@@ -159,11 +187,17 @@ const createOrder = async (req, res) => {
           clientSecret: paymentIntent.client_secret,
         };
 
-        // Check payment status and update order accordingly
+        // Handle payment status
         if (paymentIntent.status === 'succeeded') {
           order.isPaid = true;
           order.paidAt = new Date();
-          order.status = 'Paid';
+          order.status = 'Payment_Confirmed';
+          order.statusHistory.push({
+            status: 'Payment_Confirmed',
+            timestamp: new Date(),
+            note: 'Online payment completed successfully',
+            updatedBy: req.user._id
+          });
           order.paymentResult = {
             id: paymentIntent.id,
             status: paymentIntent.status,
@@ -173,63 +207,69 @@ const createOrder = async (req, res) => {
 
           await order.save();
 
-          res.status(201).json({
+          return res.status(201).json({
             success: true,
             message: 'Order created and payment completed successfully!',
             order,
+            orderId: order._id,
             payment: {
               status: 'succeeded',
               paymentIntentId: paymentIntent.id,
               amount: totalPrice,
               cardLast4: cleanCardNumber.slice(-4),
-            },
+            }
           });
 
         } else if (paymentIntent.status === 'requires_action') {
-          // 3D Secure or other authentication required
           await order.save();
 
-          res.status(201).json({
+          return res.status(201).json({
             success: true,
             message: 'Order created, additional authentication required',
             order,
+            orderId: order._id,
             payment: {
               status: 'requires_action',
               paymentIntentId: paymentIntent.id,
               clientSecret: paymentIntent.client_secret,
               nextAction: paymentIntent.next_action,
-            },
+            }
           });
 
         } else {
-          // Payment failed or declined
-          order.status = 'Payment Failed';
+          order.statusHistory.push({
+            status: 'Payment_Failed',
+            timestamp: new Date(),
+            note: 'Payment was declined or failed',
+            updatedBy: req.user._id
+          });
           order.paymentIntent.status = paymentIntent.status;
           await order.save();
 
-          res.status(400).json({
+          return res.status(400).json({
             success: false,
             message: 'Payment failed',
-            order,
+            orderId: order._id,
             payment: {
               status: paymentIntent.status,
               error: 'Payment was declined or failed',
               cardLast4: cleanCardNumber.slice(-4),
-            },
+            }
           });
         }
 
       } catch (stripeError) {
         console.error('Stripe payment processing error:', stripeError);
         
-        // Update order status to failed and keep for reference
-        order.status = 'Payment Failed';
-        order.paymentIntent = {
-          error: stripeError.message,
-        };
+        order.statusHistory.push({
+          status: 'Payment_Failed',
+          timestamp: new Date(),
+          note: `Payment processing error: ${stripeError.message}`,
+          updatedBy: req.user._id
+        });
+        order.paymentIntent = { error: stripeError.message };
         await order.save();
         
-        // Provide better error messages based on Stripe error types
         let userMessage = 'Payment processing failed';
         let errorDetails = {};
 
@@ -242,9 +282,7 @@ const createOrder = async (req, res) => {
           };
         } else if (stripeError.type === 'StripeInvalidRequestError') {
           userMessage = 'Payment configuration error';
-          errorDetails = {
-            message: 'Please try again or contact support',
-          };
+          errorDetails = { message: 'Please try again or contact support' };
         }
         
         return res.status(400).json({
@@ -252,28 +290,146 @@ const createOrder = async (req, res) => {
           message: userMessage,
           error: stripeError.message,
           orderId: order._id,
-          details: errorDetails,
+          details: errorDetails
         });
       }
     } else {
-      // For other payment methods (PayPal, Cash on Delivery, Bank Transfer, etc.)
+      // For other payment methods
       console.log(`Order created with payment method: ${paymentMethod}`);
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
-        message: 'Order created successfully',
+        message: 'Order created successfully. Please complete payment.',
         order,
+        orderId: order._id
       });
     }
 
   } catch (error) {
     console.error('Error creating order:', error);
-    res.status(500).json({ 
+    return res.status(500).json({ 
       success: false,
       message: 'Internal server error while creating order',
       error: error.message 
     });
   }
 };
+
+// Create payment intent (separate endpoint for frontend)
+const createPaymentIntent = async (req, res) => {
+  try {
+    const { amount, currency = 'usd', orderData } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid amount is required'
+      });
+    }
+
+    if (!orderData) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order data is required'
+      });
+    }
+
+    // Create payment intent without confirming
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount),
+      currency: currency,
+      automatic_payment_methods: {
+        enabled: true,
+      },
+      metadata: {
+        userId: req.user._id.toString(),
+        userEmail: req.user.email || '',
+      },
+    });
+
+    res.json({
+      success: true,
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id
+    });
+
+  } catch (error) {
+    console.error('Error creating payment intent:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error creating payment intent',
+      error: error.message
+    });
+  }
+};
+
+// Confirm payment and create order
+const confirmPayment = async (req, res) => {
+  try {
+    const { paymentIntentId, orderData } = req.body;
+
+    if (!paymentIntentId || !orderData) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment Intent ID and order data are required'
+      });
+    }
+
+    // Retrieve payment intent from Stripe
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    if (paymentIntent.status !== 'succeeded') {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment has not been completed successfully'
+      });
+    }
+
+    // Create the order
+    const order = await Order.create({
+      ...orderData,
+      user: req.user._id,
+      isPaid: true,
+      paidAt: new Date(),
+      status: 'Payment_Confirmed',
+      paymentResult: {
+        id: paymentIntent.id,
+        status: paymentIntent.status,
+        updateTime: new Date().toISOString(),
+        emailAddress: req.user.email || '',
+      },
+      statusHistory: [{
+        status: 'Pending',
+        timestamp: new Date(),
+        note: 'Order placed successfully',
+        updatedBy: req.user._id
+      }, {
+        status: 'Payment_Confirmed',
+        timestamp: new Date(),
+        note: 'Payment confirmed successfully',
+        updatedBy: req.user._id
+      }]
+    });
+
+    console.log(`Order confirmed with payment: ${order._id}`);
+
+    res.json({
+      success: true,
+      message: 'Order created and payment confirmed successfully',
+      order,
+      orderId: order._id
+    });
+
+  } catch (error) {
+    console.error('Error confirming payment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error confirming payment',
+      error: error.message
+    });
+  }
+};
+
+// Get orders with enhanced filtering
 const getOrders = async (req, res) => {
   try {
     console.log('Admin fetching all orders...');
@@ -283,6 +439,7 @@ const getOrders = async (req, res) => {
     const skip = (page - 1) * limit;
     
     const status = req.query.status;
+    const paymentType = req.query.paymentType;
     const startDate = req.query.startDate;
     const endDate = req.query.endDate;
     
@@ -291,16 +448,17 @@ const getOrders = async (req, res) => {
     if (status && status !== 'all') {
       filter.status = status;
     }
+    if (paymentType && paymentType !== 'all') {
+      filter.paymentType = paymentType;
+    }
     if (startDate || endDate) {
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate);
       if (endDate) filter.createdAt.$lte = new Date(endDate);
     }
 
-    // Get total count for pagination
     const totalOrders = await Order.countDocuments(filter);
     
-    // Find orders with pagination and populate user data
     const orders = await Order.find(filter)
       .populate('user', 'name email')
       .sort({ createdAt: -1 })
@@ -330,6 +488,8 @@ const getOrders = async (req, res) => {
     });
   }
 };
+
+// Get user's orders
 const getMyOrders = async (req, res) => {
   try {
     console.log(`Fetching orders for user: ${req.user._id}`);
@@ -340,7 +500,6 @@ const getMyOrders = async (req, res) => {
     
     const status = req.query.status;
     
-    // Build filter object
     let filter = { user: req.user._id };
     if (status && status !== 'all') {
       filter.status = status;
@@ -351,7 +510,26 @@ const getMyOrders = async (req, res) => {
     const orders = await Order.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
+
+    // For each order, check if there are reviews for specific order-product combinations
+    for (let order of orders) {
+      if (Array.isArray(order.orderItems)) {
+        for (let item of order.orderItems) {
+          // Check if there's a review for this specific order + product combination
+          const review = await Review.findOne({
+            userId: req.user._id,
+            productId: item.product,
+            orderId: order._id
+          }).lean();
+          
+          // Set reviewGiven based on whether a review exists for THIS specific order
+          item.reviewGiven = !!review;
+          item.review = review || null;
+        }
+      }
+    }
 
     console.log(`Found ${orders.length} orders for user`);
 
@@ -366,21 +544,22 @@ const getMyOrders = async (req, res) => {
         hasPrevPage: page > 1,
       },
     });
-
+    
   } catch (error) {
     console.error('Error getting user orders:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       message: 'Error fetching your orders',
-      error: error.message 
+      error: error.message
     });
   }
 };
+
+// Get order by ID
 const getOrderById = async (req, res) => {
   try {
     console.log('Fetching order with ID:', req.params.id);
 
-    // Validate MongoDB ObjectId format
     if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({ 
         success: false,
@@ -390,7 +569,8 @@ const getOrderById = async (req, res) => {
 
     const order = await Order.findById(req.params.id)
       .populate('user', 'name email')
-      .populate('orderItems.product', 'name image');
+      .populate('orderItems.product', 'name image')
+      .populate('statusHistory.updatedBy', 'name');
 
     if (!order) {
       console.log('Order not found');
@@ -400,7 +580,7 @@ const getOrderById = async (req, res) => {
       });
     }
 
-    // Check if user is authorized to view this order
+    // Check authorization
     if (order.user._id.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
       return res.status(403).json({ 
         success: false,
@@ -412,7 +592,10 @@ const getOrderById = async (req, res) => {
 
     res.json({
       success: true,
-      order,
+      order: {
+        ...order.toObject(),
+        trackingStage: order.getTrackingStage()
+      }
     });
 
   } catch (error) {
@@ -425,13 +608,9 @@ const getOrderById = async (req, res) => {
     });
   }
 };
-
-// @desc    Update order status
-// @route   PUT /api/orders/:id/status
-// @access  Private/Admin
+// Enhanced update order status with tracking
 const updateOrderStatus = async (req, res) => {
   try {
-    // Check if request body exists
     if (!req.body) {
       return res.status(400).json({ 
         success: false,
@@ -439,8 +618,12 @@ const updateOrderStatus = async (req, res) => {
       });
     }
 
-    const { status } = req.body;
-    const validStatuses = ['Pending', 'Processing', 'Paid', 'Shipped', 'Delivered', 'Cancelled'];
+    const { status, note, trackingNumber, courier, estimatedDeliveryDate } = req.body;
+    const validStatuses = [
+      'Pending', 'Payment_Confirmed', 'Processing', 'Ready_to_Ship', 
+      'Shipped', 'Out_for_Delivery', 'Delivered', 'Cancelled', 
+      'Payment_Failed', 'Returned', 'Refunded'
+    ];
 
     if (!status) {
       return res.status(400).json({ 
@@ -465,14 +648,28 @@ const updateOrderStatus = async (req, res) => {
       });
     }
 
-    // Update status and related fields
-    order.status = status;
+    // Add status to history
+    order.addStatusToHistory(status, note || `Status updated to ${status}`, req.user._id);
 
-    // Update delivery status if order is delivered
+    // Update specific fields based on status
     if (status === 'Delivered' && !order.isDelivered) {
       order.isDelivered = true;
       order.deliveredAt = new Date();
+      
+      // Mark COD as collected if cash on delivery
+      if (order.paymentType === 'cash_on_delivery' && !order.isPaid) {
+        order.isPaid = true;
+        order.paidAt = new Date();
+        order.codDetails.collectedAmount = order.codDetails.amountToCollect;
+        order.codDetails.collectedAt = new Date();
+        order.codDetails.collectedBy = req.body.deliveredBy || 'Delivery Team';
+      }
     }
+
+    // Update tracking information if provided
+    if (trackingNumber) order.tracking.trackingNumber = trackingNumber;
+    if (courier) order.tracking.courier = courier;
+    if (estimatedDeliveryDate) order.tracking.estimatedDeliveryDate = new Date(estimatedDeliveryDate);
 
     const updatedOrder = await order.save();
 
@@ -481,7 +678,10 @@ const updateOrderStatus = async (req, res) => {
     res.json({
       success: true,
       message: `Order status updated to ${status}`,
-      order: updatedOrder,
+      order: {
+        ...updatedOrder.toObject(),
+        trackingStage: updatedOrder.getTrackingStage()
+      }
     });
 
   } catch (error) {
@@ -493,6 +693,136 @@ const updateOrderStatus = async (req, res) => {
     });
   }
 };
+
+// Confirm COD payment collection
+const confirmCODPayment = async (req, res) => {
+  try {
+    const { collectedAmount, collectedBy } = req.body;
+    
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Order not found' 
+      });
+    }
+
+    if (order.paymentType !== 'cash_on_delivery') {
+      return res.status(400).json({ 
+        success: false,
+        message: 'This is not a cash on delivery order' 
+      });
+    }
+
+    if (order.isPaid) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Payment already confirmed for this order' 
+      });
+    }
+
+    // Update payment details
+    order.isPaid = true;
+    order.paidAt = new Date();
+    order.codDetails.collectedAmount = collectedAmount || order.codDetails.amountToCollect;
+    order.codDetails.collectedAt = new Date();
+    order.codDetails.collectedBy = collectedBy || 'Delivery Team';
+    
+    order.addStatusToHistory('Delivered', 'COD payment collected and order delivered', req.user._id);
+
+    const updatedOrder = await order.save();
+
+    res.json({
+      success: true,
+      message: 'COD payment confirmed successfully',
+      order: {
+        ...updatedOrder.toObject(),
+        trackingStage: updatedOrder.getTrackingStage()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error confirming COD payment:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Error confirming COD payment',
+      error: error.message 
+    });
+  }
+};
+
+// Get order tracking info for frontend
+const getOrderTracking = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+      .populate('user', '_id name email')
+      .populate('statusHistory.updatedBy', 'name')
+      .select('status statusHistory tracking paymentType totalPrice codDetails user');
+
+    if (!order) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Order not found' 
+      });
+    }
+
+    // Check authorization with proper null checks
+    if (!order.user || !order.user._id) {
+      return res.status(403).json({ 
+        success: false,
+        message: 'Invalid order user data' 
+      });
+    }
+
+    if (order.user._id.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ 
+        success: false,
+        message: 'Not authorized to view this order tracking' 
+      });
+    }
+
+    // Get tracking stage information
+    const trackingInfo = order.getTrackingStage();
+
+    // Format the response to match frontend expectations
+    res.json({
+      success: true,
+      tracking: {
+        ...trackingInfo,
+        orderId: order._id,
+        currentStatus: order.status,
+        paymentType: order.paymentType,
+        trackingDetails: {
+          trackingNumber: order.tracking?.trackingNumber || '',
+          courier: order.tracking?.courier || '',
+          estimatedDeliveryDate: order.tracking?.estimatedDeliveryDate || '',
+          trackingUrl: order.tracking?.trackingUrl || '',
+          currentLocation: order.tracking?.currentLocation || '',
+          notes: order.tracking?.notes || ''
+        },
+        statusHistory: order.statusHistory.map(history => ({
+          status: history.status,
+          timestamp: history.timestamp,
+          note: history.note,
+          updatedBy: history.updatedBy
+        })),
+        codDetails: order.paymentType === 'cash_on_delivery' ? order.codDetails : null
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting order tracking:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Error fetching order tracking',
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+// Confirm Stripe payment (existing function with tracking enhancement)
 const confirmStripePayment = async (req, res) => {
   try {
     const { paymentIntentId } = req.body;
@@ -504,9 +834,7 @@ const confirmStripePayment = async (req, res) => {
       });
     }
 
-    // Retrieve payment intent from Stripe
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-
     const order = await Order.findById(req.params.id);
 
     if (!order) {
@@ -516,7 +844,6 @@ const confirmStripePayment = async (req, res) => {
       });
     }
 
-    // Verify the payment intent belongs to this order
     if (order.paymentIntent?.id !== paymentIntentId) {
       return res.status(400).json({ 
         success: false,
@@ -527,7 +854,7 @@ const confirmStripePayment = async (req, res) => {
     if (paymentIntent.status === 'succeeded') {
       order.isPaid = true;
       order.paidAt = new Date();
-      order.status = 'Paid';
+      order.addStatusToHistory('Payment_Confirmed', 'Stripe payment confirmed successfully', req.user._id);
       order.paymentResult = {
         id: paymentIntent.id,
         status: paymentIntent.status,
@@ -543,7 +870,10 @@ const confirmStripePayment = async (req, res) => {
       res.json({
         success: true,
         message: 'Payment confirmed successfully',
-        order,
+        order: {
+          ...order.toObject(),
+          trackingStage: order.getTrackingStage()
+        }
       });
     } else {
       res.status(400).json({
@@ -562,6 +892,8 @@ const confirmStripePayment = async (req, res) => {
     });
   }
 };
+
+// Enhanced webhook handler with tracking
 const handleStripeWebhook = async (req, res) => {
   const sig = req.headers['stripe-signature'];
   const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -577,7 +909,6 @@ const handleStripeWebhook = async (req, res) => {
 
   console.log(`Stripe webhook event: ${event.type}`);
 
-  // Handle the event
   switch (event.type) {
     case 'payment_intent.succeeded':
       const paymentIntent = event.data.object;
@@ -588,7 +919,7 @@ const handleStripeWebhook = async (req, res) => {
         if (order && !order.isPaid) {
           order.isPaid = true;
           order.paidAt = new Date();
-          order.status = 'Paid';
+          order.addStatusToHistory('Payment_Confirmed', 'Payment confirmed via Stripe webhook');
           order.paymentResult = {
             id: paymentIntent.id,
             status: paymentIntent.status,
@@ -610,7 +941,7 @@ const handleStripeWebhook = async (req, res) => {
       try {
         const order = await Order.findById(failedOrderId);
         if (order) {
-          order.status = 'Payment Failed';
+          order.addStatusToHistory('Payment_Failed', 'Payment failed via Stripe webhook');
           order.paymentIntent.status = failedPayment.status;
           await order.save();
           console.log(`Order ${failedOrderId} marked as payment failed via webhook`);
@@ -627,7 +958,7 @@ const handleStripeWebhook = async (req, res) => {
       try {
         const order = await Order.findById(canceledOrderId);
         if (order) {
-          order.status = 'Cancelled';
+          order.addStatusToHistory('Cancelled', 'Payment cancelled via Stripe webhook');
           order.paymentIntent.status = canceledPayment.status;
           await order.save();
           console.log(`Order ${canceledOrderId} cancelled via webhook`);
@@ -644,11 +975,10 @@ const handleStripeWebhook = async (req, res) => {
   res.json({ received: true });
 };
 
-// @desc    Cancel order
-// @route   PUT /api/orders/:id/cancel
-// @access  Private
+// Enhanced cancel order with tracking
 const cancelOrder = async (req, res) => {
   try {
+    const { reason } = req.body;
     const order = await Order.findById(req.params.id);
 
     if (!order) {
@@ -667,10 +997,10 @@ const cancelOrder = async (req, res) => {
     }
 
     // Check if order can be cancelled
-    if (['Shipped', 'Delivered'].includes(order.status)) {
+    if (['Shipped', 'Out_for_Delivery', 'Delivered'].includes(order.status)) {
       return res.status(400).json({ 
         success: false,
-        message: 'Cannot cancel shipped or delivered orders' 
+        message: 'Cannot cancel shipped, out for delivery, or delivered orders' 
       });
     }
 
@@ -681,11 +1011,15 @@ const cancelOrder = async (req, res) => {
         console.log(`Cancelled Stripe payment intent: ${order.paymentIntent.id}`);
       } catch (stripeError) {
         console.error('Error cancelling Stripe payment intent:', stripeError);
-        // Continue with order cancellation even if Stripe cancellation fails
       }
     }
 
-    order.status = 'Cancelled';
+    // Update order with cancellation details
+    order.addStatusToHistory('Cancelled', reason || 'Order cancelled by user', req.user._id);
+    order.cancellationReason = reason;
+    order.cancelledBy = req.user._id;
+    order.cancelledAt = new Date();
+
     const updatedOrder = await order.save();
 
     console.log(`Order ${order._id} cancelled`);
@@ -693,7 +1027,10 @@ const cancelOrder = async (req, res) => {
     res.json({
       success: true,
       message: 'Order cancelled successfully',
-      order: updatedOrder,
+      order: {
+        ...updatedOrder.toObject(),
+        trackingStage: updatedOrder.getTrackingStage()
+      }
     });
 
   } catch (error) {
@@ -706,9 +1043,9 @@ const cancelOrder = async (req, res) => {
   }
 };
 
+// Enhanced delete order
 const deleteOrder = async (req, res) => {
   try {
-    // Validate MongoDB ObjectId format
     if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({ 
         success: false,
@@ -725,22 +1062,21 @@ const deleteOrder = async (req, res) => {
       });
     }
 
-    // Check if order can be deleted (only allow deletion of cancelled or failed orders)
-    if (!['Cancelled', 'Payment Failed'].includes(order.status)) {
+    // Check if order can be deleted
+    if (!['Cancelled', 'Payment_Failed', 'Refunded'].includes(order.status)) {
       return res.status(400).json({ 
         success: false,
-        message: 'Only cancelled or failed orders can be deleted' 
+        message: 'Only cancelled, failed, or refunded orders can be deleted' 
       });
     }
 
-    // If order has a Stripe payment intent, cancel it first
+    // Cancel Stripe payment intent if exists
     if (order.paymentIntent?.id && !order.isPaid) {
       try {
         await stripe.paymentIntents.cancel(order.paymentIntent.id);
         console.log(`Cancelled Stripe payment intent: ${order.paymentIntent.id}`);
       } catch (stripeError) {
         console.error('Error cancelling Stripe payment intent:', stripeError);
-        // Continue with order deletion even if Stripe cancellation fails
       }
     }
 
@@ -763,6 +1099,110 @@ const deleteOrder = async (req, res) => {
   }
 };
 
+// New function: Initiate return request
+const initiateReturn = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Order not found' 
+      });
+    }
+
+    // Check authorization
+    if (order.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ 
+        success: false,
+        message: 'Not authorized to return this order' 
+      });
+    }
+
+    // Check if order can be returned
+    if (order.status !== 'Delivered') {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Only delivered orders can be returned' 
+      });
+    }
+
+    // Check return window (e.g., 30 days)
+    const deliveryDate = new Date(order.deliveredAt);
+    const currentDate = new Date();
+    const daysDifference = Math.floor((currentDate - deliveryDate) / (1000 * 60 * 60 * 24));
+    
+    if (daysDifference > 30) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Return window has expired. Returns are only accepted within 30 days of delivery.' 
+      });
+    }
+
+    order.addStatusToHistory('Returned', `Return requested: ${reason}`, req.user._id);
+    order.returnReason = reason;
+    order.returnRequestedAt = new Date();
+
+    const updatedOrder = await order.save();
+
+    res.json({
+      success: true,
+      message: 'Return request initiated successfully',
+      order: {
+        ...updatedOrder.toObject(),
+        trackingStage: updatedOrder.getTrackingStage()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error initiating return:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Error initiating return',
+      error: error.message 
+    });
+  }
+};
+
+// New function: Update tracking details
+const updateTracking = async (req, res) => {
+  try {
+    const { trackingNumber, courier, estimatedDeliveryDate, trackingUrl } = req.body;
+    
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Order not found' 
+      });
+    }
+
+    // Update tracking information
+    if (trackingNumber) order.tracking.trackingNumber = trackingNumber;
+    if (courier) order.tracking.courier = courier;
+    if (estimatedDeliveryDate) order.tracking.estimatedDeliveryDate = new Date(estimatedDeliveryDate);
+    if (trackingUrl) order.tracking.trackingUrl = trackingUrl;
+
+    const updatedOrder = await order.save();
+
+    res.json({
+      success: true,
+      message: 'Tracking information updated successfully',
+      tracking: updatedOrder.tracking
+    });
+
+  } catch (error) {
+    console.error('Error updating tracking:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Error updating tracking information',
+      error: error.message 
+    });
+  }
+};
+
 module.exports = {
   createOrder,
   getOrders,
@@ -773,4 +1213,10 @@ module.exports = {
   handleStripeWebhook,
   cancelOrder,
   deleteOrder,
+  confirmCODPayment,
+  getOrderTracking,
+  initiateReturn,
+  updateTracking,
+  createPaymentIntent,
+  confirmPayment
 };

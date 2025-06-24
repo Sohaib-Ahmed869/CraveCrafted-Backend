@@ -5,28 +5,30 @@ const reviewController = {
   // Create a new review
   createReview: async (req, res) => {
     try {
-      const { userId, productId, stars, feedback } = req.body;
+      const { userId, productId, orderId, orderItemId, stars, feedback } = req.body;
 
       // Validate required fields
-      if (!userId || !productId || !stars || !feedback) {
+      if (!userId || !productId || !orderId || !stars || !feedback) {
         return res.status(400).json({
           success: false,
-          message: 'All fields are required: userId, productId, stars, feedback'
+          message: 'All fields are required: userId, productId, orderId, stars, feedback'
         });
       }
 
-      // Check if user already reviewed this product
-      const existingReview = await Review.findOne({ userId, productId });
+      // Check if user already reviewed this product for this specific order
+      const existingReview = await Review.findOne({ userId, productId, orderId });
       if (existingReview) {
         return res.status(409).json({
           success: false,
-          message: 'You have already reviewed this product'
+          message: 'You have already reviewed this product for this order'
         });
       }
 
       const review = new Review({
         userId,
         productId,
+        orderId,
+        orderItemId,
         stars,
         feedback
       });
@@ -34,6 +36,7 @@ const reviewController = {
       await review.save();
       await review.populate('userId', 'name email');
       await review.populate('productId', 'name');
+      await review.populate('orderId');
 
       res.status(201).json({
         success: true,
@@ -59,11 +62,13 @@ const reviewController = {
       const filter = {};
       if (req.query.productId) filter.productId = req.query.productId;
       if (req.query.userId) filter.userId = req.query.userId;
+      if (req.query.orderId) filter.orderId = req.query.orderId;
       if (req.query.stars) filter.stars = parseInt(req.query.stars);
 
       const reviews = await Review.find(filter)
         .populate('userId', 'name email')
         .populate('productId', 'name')
+        .populate('orderId')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit);
@@ -150,6 +155,7 @@ const reviewController = {
 
       const reviews = await Review.find({ userId })
         .populate('productId', 'name')
+        .populate('orderId')
         .sort({ createdAt: -1 });
 
       res.status(200).json({
@@ -180,7 +186,8 @@ const reviewController = {
 
       const review = await Review.findById(id)
         .populate('userId', 'name email')
-        .populate('productId', 'name');
+        .populate('productId', 'name')
+        .populate('orderId');
 
       if (!review) {
         return res.status(404).json({
@@ -230,6 +237,7 @@ const reviewController = {
       await review.save();
       await review.populate('userId', 'name email');
       await review.populate('productId', 'name');
+      await review.populate('orderId');
 
       res.status(200).json({
         success: true,

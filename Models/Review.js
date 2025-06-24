@@ -13,6 +13,16 @@ const reviewSchema = new mongoose.Schema({
     required: [true, 'Product ID is required'],
     index: true
   },
+  orderId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Order',
+    required: [true, 'Order ID is required'],
+    index: true
+  },
+  orderItemId: {
+    type: String, // Store the specific order item ID if needed
+    required: false
+  },
   stars: {
     type: Number,
     required: [true, 'Rating is required'],
@@ -44,8 +54,11 @@ const reviewSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Compound index to ensure one review per user per product
-reviewSchema.index({ userId: 1, productId: 1 }, { unique: true });
+// Compound index to ensure one review per user per product PER ORDER
+reviewSchema.index({ userId: 1, productId: 1, orderId: 1 }, { unique: true });
+
+// Keep the old index for backward compatibility but make it non-unique
+reviewSchema.index({ userId: 1, productId: 1 });
 
 // Virtual for review age
 reviewSchema.virtual('reviewAge').get(function() {

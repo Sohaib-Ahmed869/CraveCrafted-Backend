@@ -43,7 +43,7 @@ const upload = multer({
 // Get all products
 const getAllProducts = async (req, res) => {
   try {
-    const { page = 1, limit = 10, category, status, search } = req.query;
+    const { category, status, search } = req.query;
     
     // Build filter object
     const filter = {};
@@ -55,33 +55,15 @@ const getAllProducts = async (req, res) => {
         { description: { $regex: search, $options: 'i' } }
       ];
     }
-
-    // Calculate pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
     
-    // Get products
+    // Get all products
     const products = await Product.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    // Get total count
-    const totalProducts = await Product.countDocuments(filter);
-    const totalPages = Math.ceil(totalProducts / parseInt(limit));
+      .sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
       message: 'Products retrieved successfully',
-      data: {
-        products,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages,
-          totalProducts,
-          hasNextPage: parseInt(page) < totalPages,
-          hasPrevPage: parseInt(page) > 1
-        }
-      }
+      data: { products }
     });
 
   } catch (error) {
@@ -96,7 +78,7 @@ const getAllProducts = async (req, res) => {
 // Create new product
 const createProduct = async (req, res) => {
   try {
-    const { title, description, price, stock, tagline, ingredients, category } = req.body;
+    const { title, description, price, stock, tagline, ingredients, category, featured } = req.body;
     
     if (!req.file) {
       return res.status(400).json({
@@ -104,6 +86,30 @@ const createProduct = async (req, res) => {
         message: 'Product image is required'
       });
     }
+
+    // Validate required fields
+    if (!title || !description || !price || !category) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide all required fields: title, description, price, and category'
+      });
+    }
+
+    // Handle ingredients - convert to array if it's a string, otherwise use empty array
+    const ingredientsArray = typeof ingredients === 'string' 
+      ? ingredients.split(',').map(ing => ing.trim()).filter(ing => ing)
+      : [];
+
+    // Validate ingredients array is not empty
+    if (ingredientsArray.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one ingredient is required'
+      });
+    }
+
+    // Convert featured to boolean
+    const isFeatured = featured === 'true' || featured === true;
 
     const product = new Product({
       title,
@@ -113,8 +119,9 @@ const createProduct = async (req, res) => {
       image: req.file.key,
       imageUrl: req.file.location,
       tagline,
-      ingredients: ingredients.split(',').map(ing => ing.trim()),
-      category
+      ingredients: ingredientsArray,
+      category,
+      featured: isFeatured
     });
 
     await product.save();
@@ -247,9 +254,8 @@ const getProduct = async (req, res) => {
 // Get featured products
 const getFeaturedProducts = async (req, res) => {
   try {
-    const featuredProducts = await Product.find({ featured: true, status: 'active' })
-      .sort({ createdAt: -1 })
-      .limit(6);
+    const featuredProducts = await Product.find({ featured: true })
+      .sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,

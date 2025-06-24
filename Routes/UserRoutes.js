@@ -10,7 +10,9 @@ const {
   updateProfile,
   changePassword,
   getAllUsers,
-  getTotalUsersCount
+  getTotalUsersCount,
+  getAllNonAdminUsers,
+  getCustomerDetails
 } = require('../Controllers/UserController');
 const {
   authenticateToken,
@@ -18,17 +20,23 @@ const {
   requireOwnershipOrAdmin
 } = require('../Middleware/AuthMiddleware');
 
+// Public routes
 router.post('/register', register);
 router.post('/login', login);
 router.post('/google-login', googleLogin);
 
+// Protected routes
 router.get('/profile', authenticateToken, getProfile);
 router.put('/profile', authenticateToken, updateProfile);
 router.put('/change-password', authenticateToken, changePassword);
 
+// Admin routes
 router.get('/all', authenticateToken, requireAdmin, getAllUsers);
 router.get('/total-count', authenticateToken, requireAdmin, getTotalUsersCount);
+router.get('/customers', authenticateToken, getAllNonAdminUsers);
+router.get('/customers/:customerId', authenticateToken, getCustomerDetails);
 
+// Parameterized routes - must come after specific routes
 router.get('/:userId', authenticateToken, requireOwnershipOrAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId);
