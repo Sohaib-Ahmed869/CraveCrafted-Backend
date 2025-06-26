@@ -12,7 +12,12 @@ const {
   getAllUsers,
   getTotalUsersCount,
   getAllNonAdminUsers,
-  getCustomerDetails
+  getCustomerDetails,
+  getAddresses,
+  addAddress,
+  updateAddress,
+  deleteAddress,
+  setDefaultAddress
 } = require('../Controllers/UserController');
 const {
   authenticateToken,
@@ -35,6 +40,13 @@ router.get('/all', authenticateToken, requireAdmin, getAllUsers);
 router.get('/total-count', authenticateToken, requireAdmin, getTotalUsersCount);
 router.get('/customers', authenticateToken, getAllNonAdminUsers);
 router.get('/customers/:customerId', authenticateToken, getCustomerDetails);
+
+// Address management for logged-in user
+router.get('/addresses', authenticateToken, getAddresses);
+router.post('/addresses', authenticateToken, addAddress);
+router.put('/addresses/:addressId', authenticateToken, updateAddress);
+router.delete('/addresses/:addressId', authenticateToken, deleteAddress);
+router.put('/addresses/:addressId/default', authenticateToken, setDefaultAddress);
 
 // Parameterized routes - must come after specific routes
 router.get('/:userId', authenticateToken, requireOwnershipOrAdmin, async (req, res) => {

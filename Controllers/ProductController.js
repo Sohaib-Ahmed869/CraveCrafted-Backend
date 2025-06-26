@@ -3,6 +3,7 @@ const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/cl
 const multer = require('multer');
 const multerS3 = require('multer-s3');
 const path = require('path');
+const Review = require('../Models/Review');
 
 // Configure S3 client
 const s3Client = new S3Client({
@@ -60,10 +61,40 @@ const getAllProducts = async (req, res) => {
     const products = await Product.find(filter)
       .sort({ createdAt: -1 });
 
+    // Get review stats for all products in one aggregation
+    const productIds = products.map(p => p._id);
+    const reviewStatsArr = await Review.aggregate([
+      { $match: { productId: { $in: productIds } } },
+      {
+        $group: {
+          _id: '$productId',
+          averageRating: { $avg: '$stars' },
+          totalReviews: { $sum: 1 }
+        }
+      }
+    ]);
+    // Convert to map for easy lookup
+    const reviewStatsMap = {};
+    reviewStatsArr.forEach(stat => {
+      reviewStatsMap[stat._id.toString()] = {
+        averageRating: parseFloat((stat.averageRating || 0).toFixed(1)),
+        totalReviews: stat.totalReviews || 0
+      };
+    });
+
+    // Attach review stats to each product
+    const productsWithReviews = products.map(product => {
+      const stats = reviewStatsMap[product._id.toString()] || { averageRating: 0, totalReviews: 0 };
+      return {
+        ...product.toObject(),
+        reviewStats: stats
+      };
+    });
+
     res.status(200).json({
       success: true,
       message: 'Products retrieved successfully',
-      data: { products }
+      data: { products: productsWithReviews }
     });
 
   } catch (error) {
@@ -236,10 +267,25 @@ const getProduct = async (req, res) => {
       });
     }
 
+    // Fetch real-time reviews for this product
+    const reviews = await Review.find({ productId: id })
+      .populate('userId', 'name')
+      .sort({ createdAt: -1 });
+
+    // Get average rating and total reviews
+    const stats = await Review.getAverageRating(id);
+
     res.status(200).json({
       success: true,
       message: 'Product retrieved successfully',
-      data: { product }
+      data: {
+        product,
+        reviews,
+        reviewStats: {
+          averageRating: parseFloat(stats.averageRating?.toFixed(1)) || 0,
+          totalReviews: stats.totalReviews || 0
+        }
+      }
     });
 
   } catch (error) {

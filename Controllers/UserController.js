@@ -248,7 +248,7 @@ const googleLogin = async (req, res) => {
 
 const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user._id);
     
     if (!user) {
       return res.status(404).json({
@@ -280,13 +280,20 @@ const getProfile = async (req, res) => {
 // Update user profile
 const updateProfile = async (req, res) => {
   try {
-    const { name, email } = req.body;
-    const userId = req.user.userId;
+    const { name, email, firstName, lastName, phone, dateOfBirth, gender, dietaryPreferences, allergies } = req.body;
+    const userId = req.user._id;
 
     // Build update object
     const updateData = {};
     if (name) updateData.name = name.trim();
     if (email) updateData.email = email.toLowerCase().trim();
+    if (firstName !== undefined) updateData.firstName = firstName;
+    if (lastName !== undefined) updateData.lastName = lastName;
+    if (phone !== undefined) updateData.phone = phone;
+    if (dateOfBirth !== undefined) updateData.dateOfBirth = dateOfBirth;
+    if (gender !== undefined) updateData.gender = gender;
+    if (dietaryPreferences !== undefined) updateData.dietaryPreferences = Array.isArray(dietaryPreferences) ? dietaryPreferences : [];
+    if (allergies !== undefined) updateData.allergies = Array.isArray(allergies) ? allergies : [];
 
     // Check if email is already taken by another user
     if (email) {
@@ -585,6 +592,118 @@ const getCustomerDetails = async (req, res) => {
   }
 };
 
+// Address management controllers
+const getAddresses = async (req, res) => {
+  console.log('getAddresses route hit');
+  console.log('req.user:', req.user);
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      console.log('User not found for userId:', req.user._id);
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    res.status(200).json({ success: true, addresses: user.addresses || [] });
+  } catch (error) {
+    console.error('Error in getAddresses:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+const addAddress = async (req, res) => {
+  try {
+    const { name, street, city, state, zipCode, country, isDefault } = req.body;
+    if (!name) {
+      return res.status(400).json({ success: false, message: 'Address name is required' });
+    }
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (isDefault) {
+      user.addresses.forEach(addr => { addr.isDefault = false; });
+    }
+    user.addresses.push({ name, street, city, state, zipCode, country, isDefault: !!isDefault });
+    await user.save();
+    res.status(201).json({ success: true, addresses: user.addresses });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+const updateAddress = async (req, res) => {
+  try {
+    const { addressId } = req.params;
+    const { name, street, city, state, zipCode, country, isDefault } = req.body;
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    const address = user.addresses.id(addressId);
+    if (!address) {
+      return res.status(404).json({ success: false, message: 'Address not found' });
+    }
+    if (isDefault) {
+      user.addresses.forEach(addr => { addr.isDefault = false; });
+    }
+    if (name !== undefined) address.name = name;
+    if (street !== undefined) address.street = street;
+    if (city !== undefined) address.city = city;
+    if (state !== undefined) address.state = state;
+    if (zipCode !== undefined) address.zipCode = zipCode;
+    if (country !== undefined) address.country = country;
+    if (isDefault !== undefined) address.isDefault = !!isDefault;
+    await user.save();
+    res.status(200).json({ success: true, addresses: user.addresses });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+const deleteAddress = async (req, res) => {
+  try {
+    const { addressId } = req.params;
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    const address = user.addresses.id(addressId);
+    if (!address) {
+      return res.status(404).json({ success: false, message: 'Address not found' });
+    }
+    address.remove();
+    await user.save();
+    res.status(200).json({ success: true, addresses: user.addresses });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+const setDefaultAddress = async (req, res) => {
+  try {
+    const { addressId } = req.params;
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    let found = false;
+    user.addresses.forEach(addr => {
+      if (addr._id.toString() === addressId) {
+        addr.isDefault = true;
+        found = true;
+      } else {
+        addr.isDefault = false;
+      }
+    });
+    if (!found) {
+      return res.status(404).json({ success: false, message: 'Address not found' });
+    }
+    await user.save();
+    res.status(200).json({ success: true, addresses: user.addresses });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -595,5 +714,10 @@ module.exports = {
   getAllUsers,
   getTotalUsersCount,
   getAllNonAdminUsers,
-  getCustomerDetails
+  getCustomerDetails,
+  getAddresses,
+  addAddress,
+  updateAddress,
+  deleteAddress,
+  setDefaultAddress
 };

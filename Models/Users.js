@@ -57,13 +57,28 @@ const userSchema = new Schema({
     type: String,
     trim: true
   },
-  address: {
-    street: String,
-    city: String,
-    state: String,
-    zipCode: String,
-    country: String
-  }
+  addresses: [
+    {
+      _id: { type: Schema.Types.ObjectId, auto: true },
+      name: { type: String, required: true },
+      street: String,
+      city: String,
+      state: String,
+      zipCode: String,
+      country: String,
+      isDefault: { type: Boolean, default: false }
+    }
+  ],
+  firstName: { type: String, trim: true },
+  lastName: { type: String, trim: true },
+  dateOfBirth: { type: Date },
+  gender: {
+    type: String,
+    enum: ['male', 'female', 'other', 'prefer-not-to-say', ''],
+    default: ''
+  },
+  dietaryPreferences: [{ type: String, trim: true }],
+  allergies: [{ type: String, trim: true }],
 }, {
   timestamps: true
 });
