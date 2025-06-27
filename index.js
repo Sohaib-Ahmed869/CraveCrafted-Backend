@@ -16,8 +16,10 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // CORS configuration
 const allowedOrigins = [
   'http://localhost:3000',
-  'http://localhost:5173'
+  'http://localhost:5173',
+  'https://crave-crafe-frontend.vercel.app'
 ];
+
 // Add CORS_ORIGIN to allowedOrigins if it exists and is a valid URL
 if (process.env.CORS_ORIGIN) {
   try {
@@ -27,6 +29,7 @@ if (process.env.CORS_ORIGIN) {
     console.warn('Invalid CORS_ORIGIN URL:', process.env.CORS_ORIGIN);
   }
 }
+
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -42,13 +45,11 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   exposedHeaders: ['Authorization'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
+  optionsSuccessStatus: 200
 };
-// Apply CORS to all routes
-app.use(cors({
-  origin: true,
-  credentials: true
-}));
+
+// Apply CORS with the proper configuration
+app.use(cors(corsOptions));
 // Connect to database
 connectDB();
 // Routes
