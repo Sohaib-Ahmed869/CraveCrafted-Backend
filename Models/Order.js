@@ -29,19 +29,91 @@ const orderSchema = mongoose.Schema(
     paymentMethod: {
       type: String,
       required: true,
-      enum: ['stripe', 'card', 'credit_card', 'debit_card', 'cash_on_delivery', 'cod', 'paypal', 'bank_transfer'],
+      enum: ['stripe', 'card', 'credit_card', 'debit_card'],
+      default: 'stripe'
     },
     
-    // Enhanced payment type categorization
+    // Payment type (only online now)
     paymentType: {
       type: String,
       required: true,
-      enum: ['online', 'cash_on_delivery'],
-      default: function() {
-        return ['cash_on_delivery', 'cod'].includes(this.paymentMethod?.toLowerCase()) 
-          ? 'cash_on_delivery' 
-          : 'online';
-      }
+      enum: ['online'],
+      default: 'online'
+    },
+
+    // Subscription and recurring fields
+    isSubscription: {
+      type: Boolean,
+      default: false
+    },
+    subscriptionType: {
+      type: String,
+      enum: ['basic', 'premium', 'custom'],
+      default: null
+    },
+    subscriptionName: {
+      type: String,
+      default: null
+    },
+    subscriptionPrice: {
+      type: Number,
+      default: 0
+    },
+    maxProducts: {
+      type: Number,
+      default: 0
+    },
+    recurrence: {
+      type: String,
+      enum: ['weekly', 'biweekly', 'monthly', 'quarterly'],
+      default: null
+    },
+    recurrenceLabel: {
+      type: String,
+      default: null
+    },
+    selectedProducts: [{
+      _id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+      title: { type: String },
+      description: { type: String },
+      imageUrl: { type: String },
+      price: { type: Number },
+      quantity: { type: Number }
+    }],
+    nextBillingDate: {
+      type: Date,
+      default: null
+    },
+    subscriptionStatus: {
+      type: String,
+      enum: ['active', 'paused', 'cancelled', 'expired', 'payment_failed'],
+      default: 'active'
+    },
+    billingCycle: {
+      type: Number,
+      default: 1 // Number of intervals between charges
+    },
+    totalBillingCycles: {
+      type: Number,
+      default: null // null for unlimited, or specific number
+    },
+    currentBillingCycle: {
+      type: Number,
+      default: 1
+    },
+
+    // Stripe-specific fields
+    stripeSubscriptionId: {
+      type: String,
+      default: null
+    },
+    stripeCustomerId: {
+      type: String,
+      default: null
+    },
+    stripePriceId: {
+      type: String,
+      default: null
     },
 
     // Stripe payment fields
@@ -57,6 +129,20 @@ const orderSchema = mongoose.Schema(
       updateTime: { type: String },
       emailAddress: { type: String },
     },
+
+    // Payment history for subscriptions
+    paymentHistory: [{
+      paymentId: { type: String }, // Stripe payment intent or invoice ID
+      amount: { type: Number, required: true },
+      currency: { type: String, default: 'usd' },
+      status: { type: String, required: true }, // 'succeeded', 'failed', 'pending'
+      billingCycle: { type: Number }, // Which billing cycle this payment is for
+      paidAt: { type: Date, default: Date.now },
+      stripeInvoiceId: { type: String }, // For subscription payments
+      stripePaymentIntentId: { type: String }, // For one-time payments
+      failureReason: { type: String }, // If payment failed
+      metadata: { type: mongoose.Schema.Types.Mixed } // Additional payment data
+    }],
 
     // Price breakdown
     itemsPrice: {
@@ -106,14 +192,14 @@ const orderSchema = mongoose.Schema(
       required: true,
       enum: [
         'Pending',           // Order placed, awaiting payment confirmation
-        'Payment_Confirmed', // Payment confirmed (for online) or order confirmed (for COD)
+        'Payment_Confirmed', // Payment confirmed
         'Processing',        // Order being prepared/packed
         'Ready_to_Ship',     // Order packed and ready for pickup by courier
         'Shipped',           // Order picked up by courier and in transit
         'Out_for_Delivery',  // Order is out for final delivery
         'Delivered',         // Order successfully delivered
         'Cancelled',         // Order cancelled
-        'Payment_Failed',    // Payment failed (for online payments)
+        'Payment_Failed',    // Payment failed
         'Returned',          // Order returned by customer
         'Refunded'           // Order refunded
       ],
@@ -126,6 +212,8 @@ const orderSchema = mongoose.Schema(
       courier: { type: String }, // e.g., 'FedEx', 'UPS', 'DHL', 'Local Delivery'
       estimatedDeliveryDate: { type: Date },
       trackingUrl: { type: String },
+      currentLocation: { type: String },
+      notes: { type: String }
     },
 
     // Timeline tracking for frontend display
@@ -158,14 +246,6 @@ const orderSchema = mongoose.Schema(
       }
     }],
 
-    // Special handling for cash on delivery
-    codDetails: {
-      amountToCollect: { type: Number },
-      collectedAmount: { type: Number },
-      collectedAt: { type: Date },
-      collectedBy: { type: String }, // Delivery person name/ID
-    },
-
     // Cancellation details
     cancellationReason: { type: String },
     cancelledBy: {
@@ -189,17 +269,31 @@ const orderSchema = mongoose.Schema(
   }
 );
 
-// Pre-save middleware to automatically set paymentType
+// Pre-save middleware for subscription billing dates
 orderSchema.pre('save', function(next) {
-  if (this.isModified('paymentMethod')) {
-    this.paymentType = ['cash_on_delivery', 'cod'].includes(this.paymentMethod?.toLowerCase()) 
-      ? 'cash_on_delivery' 
-      : 'online';
-  }
-  
-  // Set COD amount if payment type is cash on delivery
-  if (this.paymentType === 'cash_on_delivery' && !this.codDetails.amountToCollect) {
-    this.codDetails.amountToCollect = this.totalPrice;
+  // Set next billing date for new subscriptions
+  if (this.isSubscription && this.isNew && !this.nextBillingDate) {
+    const now = new Date();
+    const billingCycle = this.billingCycle || 1;
+    
+    switch (this.recurrence) {
+      case 'weekly':
+        this.nextBillingDate = new Date(now.getTime() + (7 * billingCycle * 24 * 60 * 60 * 1000));
+        break;
+      case 'biweekly':
+        this.nextBillingDate = new Date(now.getTime() + (14 * billingCycle * 24 * 60 * 60 * 1000));
+        break;
+      case 'monthly':
+        const nextMonth = new Date(now);
+        nextMonth.setMonth(nextMonth.getMonth() + billingCycle);
+        this.nextBillingDate = nextMonth;
+        break;
+      case 'quarterly':
+        const nextQuarter = new Date(now);
+        nextQuarter.setMonth(nextQuarter.getMonth() + (3 * billingCycle));
+        this.nextBillingDate = nextQuarter;
+        break;
+    }
   }
   
   next();
@@ -216,11 +310,27 @@ orderSchema.methods.addStatusToHistory = function(status, note = '', updatedBy =
   this.status = status;
 };
 
+// Instance method to add payment to history
+orderSchema.methods.addPaymentToHistory = function(paymentData) {
+  this.paymentHistory.push({
+    paymentId: paymentData.paymentId,
+    amount: paymentData.amount,
+    currency: paymentData.currency || 'usd',
+    status: paymentData.status,
+    billingCycle: paymentData.billingCycle || this.currentBillingCycle,
+    paidAt: paymentData.paidAt || new Date(),
+    stripeInvoiceId: paymentData.stripeInvoiceId,
+    stripePaymentIntentId: paymentData.stripePaymentIntentId,
+    failureReason: paymentData.failureReason,
+    metadata: paymentData.metadata || {}
+  });
+};
+
 // Instance method to get current tracking stage for frontend
 orderSchema.methods.getTrackingStage = function() {
   const stages = [
     { key: 'placed', label: 'Order Placed', statuses: ['Pending'] },
-    { key: 'confirmed', label: 'Order Confirmed', statuses: ['Payment_Confirmed'] },
+    { key: 'confirmed', label: 'Payment Confirmed', statuses: ['Payment_Confirmed'] },
     { key: 'processing', label: 'Processing', statuses: ['Processing'] },
     { key: 'ready', label: 'Ready to Ship', statuses: ['Ready_to_Ship'] },
     { key: 'shipped', label: 'Shipped', statuses: ['Shipped'] },
@@ -244,10 +354,132 @@ orderSchema.methods.getTrackingStage = function() {
   };
 };
 
+// Instance method to check if subscription should be billed (now handled by Stripe)
+orderSchema.methods.shouldProcessBilling = function() {
+  if (!this.isSubscription || this.subscriptionStatus !== 'active') {
+    return false;
+  }
+
+  // Stripe handles the billing automatically
+  // This method can be used for internal tracking
+  const now = new Date();
+  return this.nextBillingDate && now >= this.nextBillingDate;
+};
+
+// Instance method to update next billing date
+orderSchema.methods.updateNextBillingDate = function() {
+  if (!this.isSubscription) {
+    return false;
+  }
+
+  const billingCycle = this.billingCycle || 1;
+  const currentDate = this.nextBillingDate || new Date();
+
+  switch (this.recurrence) {
+    case 'weekly':
+      this.nextBillingDate = new Date(currentDate.getTime() + (7 * billingCycle * 24 * 60 * 60 * 1000));
+      break;
+    case 'biweekly':
+      this.nextBillingDate = new Date(currentDate.getTime() + (14 * billingCycle * 24 * 60 * 60 * 1000));
+      break;
+    case 'monthly':
+      const nextMonth = new Date(currentDate);
+      nextMonth.setMonth(nextMonth.getMonth() + billingCycle);
+      this.nextBillingDate = nextMonth;
+      break;
+    case 'quarterly':
+      const nextQuarter = new Date(currentDate);
+      nextQuarter.setMonth(nextQuarter.getMonth() + (3 * billingCycle));
+      this.nextBillingDate = nextQuarter;
+      break;
+  }
+
+  this.currentBillingCycle += 1;
+
+  // Check if subscription has reached its limit
+  if (this.totalBillingCycles && this.currentBillingCycle > this.totalBillingCycles) {
+    this.subscriptionStatus = 'expired';
+    return false;
+  }
+
+  return true;
+};
+
 // Static method to get orders by status
 orderSchema.statics.getOrdersByStatus = function(status) {
   return this.find({ status }).populate('user', 'name email').sort({ createdAt: -1 });
 };
+
+// Static method to get active subscriptions
+orderSchema.statics.getActiveSubscriptions = async function() {
+  try {
+    return await this.find({ 
+      isSubscription: true, 
+      subscriptionStatus: 'active' 
+    }).populate('user', 'name email').sort({ nextBillingDate: 1 });
+  } catch (error) {
+    console.error('Error in getActiveSubscriptions:', error);
+    throw error;
+  }
+};
+
+// Static method to get subscription revenue analytics
+orderSchema.statics.getSubscriptionRevenue = async function(startDate, endDate) {
+  try {
+    const matchConditions = {
+      isSubscription: true,
+      isPaid: true
+    };
+
+    if (startDate || endDate) {
+      matchConditions.createdAt = {};
+      if (startDate) matchConditions.createdAt.$gte = new Date(startDate);
+      if (endDate) matchConditions.createdAt.$lte = new Date(endDate);
+    }
+
+    return await this.aggregate([
+      { $match: matchConditions },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' }
+          },
+          totalRevenue: { $sum: '$totalPrice' },
+          orderCount: { $sum: 1 },
+          averageOrderValue: { $avg: '$totalPrice' }
+        }
+      },
+      { $sort: { '_id.year': -1, '_id.month': -1 } }
+    ]);
+  } catch (error) {
+    console.error('Error in getSubscriptionRevenue:', error);
+    throw error;
+  }
+};
+
+// Virtual for subscription billing info
+orderSchema.virtual('billingInfo').get(function() {
+  if (!this.isSubscription) return null;
+  
+  return {
+    nextBillingDate: this.nextBillingDate,
+    currentCycle: this.currentBillingCycle,
+    totalCycles: this.totalBillingCycles,
+    subscriptionStatus: this.subscriptionStatus,
+    isUnlimited: !this.totalBillingCycles,
+    remainingCycles: this.totalBillingCycles ? 
+      Math.max(0, this.totalBillingCycles - this.currentBillingCycle) : 
+      null
+  };
+});
+
+// Index for efficient queries
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ status: 1 });
+orderSchema.index({ isSubscription: 1, subscriptionStatus: 1 });
+orderSchema.index({ stripeSubscriptionId: 1 });
+orderSchema.index({ nextBillingDate: 1 });
 
 const Order = mongoose.model('Order', orderSchema);
 

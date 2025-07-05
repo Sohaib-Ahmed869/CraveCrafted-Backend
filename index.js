@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const { connectDB } = require('./db');
 const dotenv = require("dotenv");
+const { initializeSubscriptionCron } = require('./utils/subscriptionCron');
 
 // Load environment variables
 dotenv.config();
@@ -52,6 +53,10 @@ const corsOptions = {
 app.use(cors(corsOptions));
 // Connect to database
 connectDB();
+
+// Initialize subscription cron jobs
+initializeSubscriptionCron();
+
 // Routes
 const authRoutes = require('./Routes/AuthRoutes');
 const userRoutes = require('./Routes/UserRoutes');
@@ -112,6 +117,7 @@ const server = app.listen(PORT, () => {
   console.log(`:rocket: Server running on port ${PORT}`);
   console.log(`:mobile_phone: Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`:globe_with_meridians: API Base URL: http://localhost:${PORT}`);
+  console.log(`:repeat: Subscription cron jobs initialized`);
 });
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
