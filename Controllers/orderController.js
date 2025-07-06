@@ -912,7 +912,7 @@ const getOrders = async (req, res) => {
     console.log('Admin fetching all orders...');
     
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 9;
     const skip = (page - 1) * limit;
     
     const status = req.query.status;
@@ -942,6 +942,19 @@ const getOrders = async (req, res) => {
       .skip(skip)
       .limit(limit);
 
+    const allMatchingOrders = await Order.find(filter);
+    const stats = {
+      total: totalOrders,
+      pending: allMatchingOrders.filter(order => order.status === 'Pending').length,
+      processing: allMatchingOrders.filter(order => order.status === 'Processing').length,
+      shipped: allMatchingOrders.filter(order => order.status === 'Shipped').length,
+      delivered: allMatchingOrders.filter(order => order.isDelivered || order.status === 'Delivered').length,
+      cancelled: allMatchingOrders.filter(order => order.status === 'Cancelled').length,
+      totalRevenue: allMatchingOrders.reduce((sum, order) => sum + (order.totalPrice || 0), 0),
+      paidOrders: allMatchingOrders.filter(order => order.isPaid).length
+    };
+    // --- END NEW ---
+
     console.log(`Found ${orders.length} orders out of ${totalOrders} total`);
 
     res.json({
@@ -954,6 +967,7 @@ const getOrders = async (req, res) => {
         hasNextPage: page < Math.ceil(totalOrders / limit),
         hasPrevPage: page > 1,
       },
+      stats // <-- add this
     });
 
   } catch (error) {
@@ -972,7 +986,7 @@ const getMyOrders = async (req, res) => {
     console.log(`Fetching orders for user: ${req.user._id}`);
     
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 9;
     const skip = (page - 1) * limit;
     
     const status = req.query.status;
@@ -1125,6 +1139,14 @@ const updateOrderStatus = async (req, res) => {
       return res.status(404).json({ 
         success: false,
         message: 'Order not found' 
+      });
+    }
+
+    // Check if this is a subscription that has been cancelled by the user
+    if (order.isSubscription && order.subscriptionStatus === 'cancelled') {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Cannot update status for a subscription that has been cancelled by the user. The subscription must be reactivated first.' 
       });
     }
 
@@ -1895,7 +1917,7 @@ const getMySubscriptions = async (req, res) => {
     console.log(`Fetching subscriptions for user: ${req.user._id}`);
     
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 9;
     const skip = (page - 1) * limit;
     
     const status = req.query.status;
@@ -2198,6 +2220,8 @@ const cancelSubscription = async (req, res) => {
     });
   }
 };
+
+
 
 // Process recurring billing for subscriptions (now handled by Stripe webhooks)
 const processRecurringBilling = async (req, res) => {
