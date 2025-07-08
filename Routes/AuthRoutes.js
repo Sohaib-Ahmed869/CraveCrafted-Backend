@@ -248,7 +248,7 @@ router.post('/forgot-password', async (req, res) => {
     console.log('Reset token saved for user:', user.email);
 
     // Create reset url
-    const resetUrl = `http://localhost:5173/reset-password/${resetToken}`;
+    const resetUrl = `https://crave-crafe-frontend.vercel.app/reset-password/${resetToken}`;
     console.log('Reset URL generated:', resetUrl);
 
     const message = `
