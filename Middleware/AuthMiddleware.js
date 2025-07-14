@@ -131,8 +131,8 @@ const requireAdmin = (req, res, next) => {
 
     console.log('requireAdmin - User role:', req.user.role);
     
-    if (req.user.role !== 'admin') {
-      console.log('requireAdmin - Access denied: User is not an admin');
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+      console.log('requireAdmin - Access denied: User is not an admin or superadmin');
       return res.status(403).json({
         success: false,
         message: 'Admin access required',
@@ -140,7 +140,7 @@ const requireAdmin = (req, res, next) => {
       });
     }
 
-    console.log('requireAdmin - User is admin, access granted');
+    console.log('requireAdmin - User is admin or superadmin, access granted');
     next();
   } catch (error) {
     console.error('requireAdmin - Error:', error);
@@ -150,6 +150,23 @@ const requireAdmin = (req, res, next) => {
       error: error.message
     });
   }
+};
+
+// Superadmin role middleware
+const requireSuperAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required'
+    });
+  }
+  if (req.user.role !== 'superadmin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Superadmin access required'
+    });
+  }
+  next();
 };
 
 // User role middleware
@@ -261,5 +278,6 @@ module.exports = {
   requireCustomerOrAdmin,
   requireOwnershipOrAdmin,
   optionalAuth,
-  requireRole
+  requireRole,
+  requireSuperAdmin
 };

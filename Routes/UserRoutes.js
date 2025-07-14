@@ -17,18 +17,24 @@ const {
   addAddress,
   updateAddress,
   deleteAddress,
-  setDefaultAddress
+  setDefaultAddress,
+  registerAdmin,
+  deleteAdmin,
+  getAllAdmins,
+  registerSuperAdmin
 } = require('../Controllers/UserController');
 const {
   authenticateToken,
   requireAdmin,
-  requireOwnershipOrAdmin
+  requireOwnershipOrAdmin,
+  requireSuperAdmin
 } = require('../Middleware/AuthMiddleware');
 
 // Public routes
 router.post('/register', register);
 router.post('/login', login);
 router.post('/google-login', googleLogin);
+router.post('/register-superadmin', registerSuperAdmin);
 
 // Protected routes
 router.get('/profile', authenticateToken, getProfile);
@@ -47,6 +53,11 @@ router.post('/addresses', authenticateToken, addAddress);
 router.put('/addresses/:addressId', authenticateToken, updateAddress);
 router.delete('/addresses/:addressId', authenticateToken, deleteAddress);
 router.put('/addresses/:addressId/default', authenticateToken, setDefaultAddress);
+
+// SUPERADMIN routes
+router.post('/register-admin', authenticateToken, requireSuperAdmin, registerAdmin);
+router.delete('/admins/:adminId', authenticateToken, requireSuperAdmin, deleteAdmin);
+router.get('/getAllAdmins', authenticateToken, requireSuperAdmin, getAllAdmins);
 
 // Parameterized routes - must come after specific routes
 router.get('/:userId', authenticateToken, requireOwnershipOrAdmin, async (req, res) => {

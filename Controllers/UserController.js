@@ -704,6 +704,188 @@ const setDefaultAddress = async (req, res) => {
   }
 };
 
+// SUPERADMIN: Register a new admin
+const registerAdmin = async (req, res) => {
+  try {
+    const { name, email, password} = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email and password are all required'
+      });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 8 characters long'
+      });
+    }
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    const newAdmin = new User({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+      role: 'admin',
+      status: 'active'
+    });
+    const savedAdmin = await newAdmin.save();
+    const adminResponse = savedAdmin.toObject();
+    delete adminResponse.password;
+    return res.status(201).json({
+      success: true,
+      message: 'Admin registered successfully',
+      data: { admin: adminResponse }
+    });
+  } catch (error) {
+    console.error('Register admin error:', error);
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: messages
+      });
+    }
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: 'Email already exists'
+      });
+    }
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error during admin registration'
+    });
+  }
+};
+
+// SUPERADMIN: Delete an admin
+const deleteAdmin = async (req, res) => {
+  try {
+    const { adminId } = req.params;
+    const admin = await User.findOne({ _id: adminId, role: 'admin' });
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: 'Admin not found'
+      });
+    }
+    await User.deleteOne({ _id: adminId });
+    return res.status(200).json({
+      success: true,
+      message: 'Admin deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete admin error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error during admin deletion'
+    });
+  }
+};
+
+// SUPERADMIN: Get all admins
+const getAllAdmins = async (req, res) => {
+  try {
+    const admins = await User.find({ role: 'admin' })
+      .select('_id name email role isTemporaryPassword status lastLogin createdAt updatedAt')
+      .sort({ createdAt: -1 });
+    const adminList = admins.map(admin => ({
+      _id: admin._id,
+      name: admin.name,
+      email: admin.email,
+      role: admin.role,
+      status: admin.status,
+      lastLogin: admin.lastLogin,
+      createdAt: admin.createdAt,
+      updatedAt: admin.updatedAt
+    }));
+    return res.status(200).json({
+      success: true,
+      message: 'Admins retrieved successfully',
+      data: adminList
+    });
+  } catch (error) {
+    console.error('Get all admins error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error while fetching admins'
+    });
+  }
+};
+
+// SUPERADMIN: Register a new superadmin (for initial setup or protected use)
+const registerSuperAdmin = async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email and password are all required'
+      });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 8 characters long'
+      });
+    }
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    const newSuperAdmin = new User({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+      role: 'superadmin',
+      status: 'active'
+    });
+    const savedSuperAdmin = await newSuperAdmin.save();
+    const superAdminResponse = savedSuperAdmin.toObject();
+    delete superAdminResponse.password;
+    const token = generateToken(savedSuperAdmin._id, savedSuperAdmin.role);
+    return res.status(201).json({
+      success: true,
+      message: 'Superadmin registered successfully',
+      data: { superadmin: superAdminResponse, token, tokenType: 'Bearer' }
+    });
+  } catch (error) {
+    console.error('Register superadmin error:', error);
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: messages
+      });
+    }
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: 'Email already exists'
+      });
+    }
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error during superadmin registration'
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -719,5 +901,9 @@ module.exports = {
   addAddress,
   updateAddress,
   deleteAddress,
-  setDefaultAddress
+  setDefaultAddress,
+  registerAdmin,
+  deleteAdmin,
+  getAllAdmins,
+  registerSuperAdmin
 };
